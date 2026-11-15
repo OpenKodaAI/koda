@@ -1087,19 +1087,140 @@ def test_auth_doc_states_the_cookie_transport_logging_rule() -> None:
     assert f"Past {cap} addresses in that hour the rest are counted but not named" in bullet
 
 
-def test_runtime_dockerfile_exports_locked_python_dependencies() -> None:
-    app_dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+_PYTHON_IMAGE_DOCKERFILES = ("Dockerfile", "Dockerfile.runtime-kernel")
 
-    assert "ENV UV_VERSION=0.10.7" in app_dockerfile
-    assert "pip==26.0 uv==${UV_VERSION}" in app_dockerfile
-    assert "COPY pyproject.toml uv.lock ./" in app_dockerfile
-    assert "uv export" in app_dockerfile
-    assert "--locked" in app_dockerfile
-    assert "--no-emit-project" in app_dockerfile
-    assert "--no-emit-workspace" in app_dockerfile
-    assert "/tmp/runtime-requirements.txt" in app_dockerfile
-    assert "COPY requirements.txt ./" not in app_dockerfile
-    assert "pip install --no-cache-dir -r requirements.txt" not in app_dockerfile
+
+def _runtime_requirements_export(dockerfile_text: str) -> str:
+    start = dockerfile_text.index("RUN uv export")
+    return dockerfile_text[start : dockerfile_text.index("--output-file /tmp/runtime-requirements.txt", start)]
+
+
+@pytest.mark.parametrize("dockerfile", _PYTHON_IMAGE_DOCKERFILES)
+def test_runtime_dockerfile_exports_locked_python_dependencies(dockerfile: str) -> None:
+    text = (ROOT / dockerfile).read_text(encoding="utf-8")
+    export = _runtime_requirements_export(text)
+
+    assert re.search(r"^ENV UV_VERSION=\S+$", text, re.MULTILINE)
+    assert re.search(r"pip==\S+ uv==\$\{UV_VERSION\}", text)
+    assert "COPY pyproject.toml uv.lock ./" in text
+    assert "--locked" in export
+    assert "--no-emit-project" in export
+    assert "--no-emit-workspace" in export
+    # Runtime dependencies only: the dev group (pytest, ruff, mypy, pip-audit and
+    # its pip, msgpack and cachecontrol) never ships, as security.yml's audit of
+    # the image set assumes.
+    assert "--no-dev" in export
+    assert "--all-groups" not in export
+    assert "--group" not in export
+    assert "COPY requirements.txt ./" not in text
+    assert "pip install --no-cache-dir -r requirements.txt" not in text
+
+
+@pytest.mark.parametrize("pin_pattern", [r"\bpip==(\S+)", r"^ENV UV_VERSION=(\S+)$"], ids=["pip", "uv"])
+def test_python_images_pin_the_same_pip_and_uv(pin_pattern: str) -> None:
+    pins = {
+        dockerfile: re.findall(pin_pattern, (ROOT / dockerfile).read_text(encoding="utf-8"), re.MULTILINE)
+        for dockerfile in _PYTHON_IMAGE_DOCKERFILES
+    }
+
+    assert all(len(found) == 1 for found in pins.values()), pins
+    assert len({found[0] for found in pins.values()}) == 1, pins
+
+
+def test_dev_stack_image_adds_the_locked_dev_group_for_its_runner() -> None:
+    """docker-compose.dev.yml runs scripts/dev/run_control_plane_dev.py in the app image; it imports watchfiles.
+
+    watchfiles is in the dev group, which the image's runtime export leaves out
+    (--no-dev). So the dev overlay builds the app image with
+    INSTALL_DEV_DEPENDENCIES=true, which adds the dev group from uv.lock, hash
+    checked, in a layer after the runtime one. The default build leaves it out.
+    """
+    base_app = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))["services"]["app"]
+    dev_app = yaml.safe_load((ROOT / "docker-compose.dev.yml").read_text(encoding="utf-8"))["services"]["app"]
+    dev_group = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["dependency-groups"]["dev"]
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert dev_app["command"] == ["python", "scripts/dev/run_control_plane_dev.py"]
+    assert any(isinstance(spec, str) and spec.startswith("watchfiles") for spec in dev_group)
+    assert dev_app["build"]["args"]["INSTALL_DEV_DEPENDENCIES"] == "true"
+    assert "INSTALL_DEV_DEPENDENCIES" not in json.dumps(base_app.get("build"))
+
+    runtime_export_end = dockerfile.index("--output-file /tmp/runtime-requirements.txt")
+    arg = dockerfile.index("ARG INSTALL_DEV_DEPENDENCIES=false\n")
+    assert arg > runtime_export_end, "the runtime layer must not depend on the dev-stack build arg"
+    dev_layer = dockerfile[dockerfile.index('RUN if [ "$INSTALL_DEV_DEPENDENCIES" = "true" ]; then', arg) :]
+    dev_layer = dev_layer[: dev_layer.index("\n    fi\n")]
+    assert "uv export" in dev_layer
+    assert "--locked" in dev_layer
+    assert "--only-dev" in dev_layer
+    assert "--no-emit-project" in dev_layer
+    assert "pip install --no-cache-dir -r /tmp/dev-requirements.txt" in dev_layer
+
+
+def _compose_built_image_name(service_name: str, service: dict[str, object], project: str) -> str:
+    """The tag Compose gives a service it builds: its image:, interpolated, or else <project>-<service>."""
+    image = service.get("image")
+    if image is None:
+        return f"{project}-{service_name}"
+    assert isinstance(image, str)
+    resolved = image.replace("${COMPOSE_PROJECT_NAME}", project)
+    assert "$" not in resolved, f"{image!r} uses a variable other than COMPOSE_PROJECT_NAME"
+    return resolved
+
+
+@pytest.mark.parametrize("project", ["koda", "koda-e2e"])
+def test_dev_stack_app_image_is_not_the_base_stack_image(project: str) -> None:
+    """The dev overlay's app image carries the dev group, so it must not take the base stack's tag.
+
+    Compose tags a built service <project>-<service> unless it sets image:, and it
+    does not rebuild when only a build arg changes. With one tag for both stacks,
+    a plain `docker compose up` after `pnpm dev:stack:build` would run the image
+    with pytest, pip-audit and the rest of the dev group in it.
+    """
+    base_app = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))["services"]["app"]
+    dev_app = yaml.safe_load((ROOT / "docker-compose.dev.yml").read_text(encoding="utf-8"))["services"]["app"]
+
+    base_image = _compose_built_image_name("app", base_app, project)
+    dev_image = _compose_built_image_name("app", {**base_app, **dev_app}, project)
+
+    assert dev_image != base_image
+    # One dev image per Compose project, like Compose's own default, so checkouts do not share it.
+    assert dev_image.startswith(f"{project}-")
+
+
+def _locked_runtime_closure() -> set[str]:
+    """Package names the images install: koda's runtime dependencies in uv.lock, transitively, no groups."""
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    packages = {package["name"]: package for package in lock["package"]}
+    koda = next(package for package in lock["package"] if package.get("source") == {"editable": "."})
+    pending = list(koda.get("dependencies", []))
+    closure: set[str] = set()
+    expanded_extras: set[tuple[str, str]] = set()
+    while pending:
+        dependency = pending.pop()
+        name = dependency["name"]
+        package = packages[name]
+        for extra in dependency.get("extra", []):
+            if (name, extra) not in expanded_extras:
+                expanded_extras.add((name, extra))
+                pending.extend(package.get("optional-dependencies", {}).get(extra, []))
+        if name not in closure:
+            closure.add(name)
+            pending.extend(package.get("dependencies", []))
+    return closure
+
+
+def test_runtime_images_keep_defusedxml_for_untrusted_xml() -> None:
+    """openpyxl (uploaded spreadsheets) and Pillow (XMP) parse XML through defusedxml when it is installed.
+
+    It used to reach the images only through the dev group (pip-audit), so the
+    --no-dev export would have silently dropped it.
+    """
+    closure = _locked_runtime_closure()
+
+    assert {"openpyxl", "pillow", "aiohttp"} <= closure
+    assert "pytest" not in closure
+    assert "defusedxml" in closure
 
 
 def test_embedding_download_client_is_packaged_for_fresh_installs() -> None:

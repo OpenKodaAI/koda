@@ -1,5 +1,12 @@
 services:
   app:
+    # The runner below imports watchfiles, from uv.lock's dev group (see Dockerfile).
+    # Its own tag, so the base stack's `<project>-app` never holds the dev group.
+    image: "${COMPOSE_PROJECT_NAME}-app-dev"
+    build:
+      context: .
+      args:
+        INSTALL_DEV_DEPENDENCIES: "true"
     read_only: false
     working_dir: /workspace
     command: ["python", "scripts/dev/run_control_plane_dev.py"]

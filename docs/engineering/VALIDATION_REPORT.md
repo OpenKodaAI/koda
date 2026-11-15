@@ -541,3 +541,38 @@ Gates at c0ab8c6 (integrate/wave-2a with the session branch merged in):
 - Web: `pnpm lint:web` 0 errors, 40 warnings; `pnpm test:web` 181 files, 1055 tests passed; `pnpm build:web` ok.
 
 M1-E4-T9 stays in review: its done-when needs the replay over stored policies, which is AG-09.
+
+## Lane merges 2026-11-15 (rule 10 lean lanes and the last old-format rounds)
+
+Merged on `claude/dreamy-cerf-mhvbwn` first, with the gates at a506f90:
+- M8-E5-T2 + M8-E2-T1 (WAVE-6 web, approved in round 1): one error state and one `error.tsx` factory (f54b2b3); mobile users can leave `/sessions`, and AppShell reads route flags (711ab6d).
+- M4-E1-T6 + M4-E1-T9 (WAVE-7 dead code, then one lean fix pass): the local and OFF knowledge paths, storage-mode wrappers and uncalled evaluation helpers are removed, and one MCP catalog and one env decrypt helper remain (de5d1fe, b845d89, 17aa6b8, f989685, 2de74bf, 54dd586; about 4,100 lines removed). A new test pins the PRIMARY artifact-evidence read. The OFF-mode change is recorded under Q-28 and in CHANGELOG.md. The review found D-260 (writes to a table no schema creates), which is now task M4-E1-T14.
+
+Gates at a506f90: ruff clean; format 736 files; mypy no issues in 354 files; `pytest --cov=koda` 8196 passed, 27 skipped, 172 xfailed, 67 % coverage; `pytest -m postgres` 274 passed, 2 skipped, 2 xfailed. Web at 19a5893 (a506f90 changes no `apps/` file): lint 0 errors and 40 warnings, 182 files and 1081 tests passed, build ok.
+
+Then on `int/w5`:
+- M1-E1-T4 + T14 + T15 (WAVE-7 auth B1, two old-format rounds, then one lean fix pass with a confirm review):
+  - The control plane configures redacting structured logs at startup, and JSON logs keep exceptions.
+  - The bootstrap file is replaced while no owner exists when it is expired or unusable: a seed containing `=` reads back, an undecodable file is replaced, and the encode runs before any file is created.
+  - The bootstrap file is published atomically (temp file, fsync, hard link) under an exclusive lock, so two replicas never announce a code the file does not hold. The fd test reads `/dev/fd`, which also exists on macOS.
+  - `/cluster/drain` and `/cluster/undrain` require the operator bearer.
+  - Commits: e046426, 2755e3a, 1b40d38, 57ca0f0, 1454428, 33cd02b, 70faf35, e7495bb.
+  - Recorded: D-261, an unencodable seed raising on every status request, which predates the change. The atomic publish needs hard-link support on the state volume; Docker named volumes and ext4/overlay mounts have it.
+- WAVE-5:
+  - M1-E7-T2: Python advisories cleared, batches P1–P5. A fresh `pip-audit --strict` on the lock and on the `--no-dev` export finds nothing. The dev overlay builds its own locked dev image. Contributor docs name every platform without a cryptography wheel.
+  - M1-E7-T3 + T11: Node advisories cleared, batches N1–N4.
+    - The relay checks access before the WebSocket handshake, admits only the attaching session, needs the dashboard Origin (stricter than `request-origin.ts`, documented and pinned by a vitest case) and bounds frames. Unrouted upgrades are refused.
+    - The bundled-proxy smoke check now expects the relay's refusals before the handshake: an empty 404 with the page Origin and an empty 403 with a foreign one. The round-3 review found that the old check would fail every docker-smoke run. Fixed in de14210 and 33c4357, checked against nginx 1.24 and the real relay.
+  - M1-E7-T6: both vendor bundles and the foreign changelog are removed; Koda's CHANGELOG.md starts at 1.0.18; hygiene tests guard against their return.
+  - D-254: test guards and helper processes stop with their pytest session. At merge, 5eaec0b makes the tests read a pid only from a whole line: a line cut short by the read deadline could become another process's pid, which the tests then SIGKILL.
+- Merge conflicts resolved, keeping both sides: `tests/test_installation_assets.py`, `tests/integration/conftest.py`, `docs/security/authentication.md` and `apps/web/src/proxy.test.ts`.
+- Needs the operator, or a host with Docker: `docker build -f apps/web/Dockerfile .` for the SUPPLY_CHAIN_TRIAGE §5.2 image gate. The stage emulation postdates the last package change. Also Q-29, the v1.0.18 npm publish recovery.
+
+Gates at 937f20b (`int/w5`):
+- `ruff check .`: all checks passed.
+- `ruff format --check .`: 742 files already formatted.
+- `mypy koda/ --ignore-missing-imports`: no issues in 354 source files.
+- `pytest --cov=koda`: 8418 passed, 27 skipped, 171 xfailed; 67 % coverage.
+- `pytest -m postgres`: 275 passed, 2 skipped, 2 xfailed.
+- Web: `pnpm lint:web` 0 errors and 40 warnings; `pnpm test:web` 184 files and 1104 tests passed; `pnpm build:web` ok.
+- `pnpm audit --audit-level=moderate` and `pnpm audit --prod`: no known vulnerabilities.

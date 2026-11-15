@@ -532,6 +532,145 @@ class TestSSHTunnel:
             mock_conn.forward_local_port.assert_awaited_once_with("127.0.0.1", 0, "db.internal", 5432)
 
 
+# label -> (host key algorithm, client key algorithm, server options that restrict
+# the negotiation). Each family runs on cryptography: the ciphers, the key
+# exchanges (finite-field DH included) and the host and client key signatures.
+_SSH_ALGORITHM_CASES = {
+    "defaults": ("ssh-ed25519", "ssh-ed25519", {}),
+    "cipher-chacha20-poly1305": ("ssh-ed25519", "ssh-ed25519", {"encryption_algs": ["chacha20-poly1305@openssh.com"]}),
+    "cipher-aes256-gcm": ("ssh-ed25519", "ssh-ed25519", {"encryption_algs": ["aes256-gcm@openssh.com"]}),
+    "cipher-aes128-ctr": (
+        "ssh-ed25519",
+        "ssh-ed25519",
+        {"encryption_algs": ["aes128-ctr"], "mac_algs": ["hmac-sha2-256-etm@openssh.com"]},
+    ),
+    "kex-curve25519": ("ssh-ed25519", "ssh-ed25519", {"kex_algs": ["curve25519-sha256"]}),
+    "kex-ecdh-nistp256": ("ssh-ed25519", "ssh-ed25519", {"kex_algs": ["ecdh-sha2-nistp256"]}),
+    "kex-dh-group14": ("ssh-ed25519", "ssh-ed25519", {"kex_algs": ["diffie-hellman-group14-sha256"]}),
+    "host-key-ecdsa": ("ecdsa-sha2-nistp256", "ssh-ed25519", {}),
+    "host-key-rsa": ("ssh-rsa", "ssh-ed25519", {}),
+    "client-key-ecdsa": ("ssh-ed25519", "ecdsa-sha2-nistp256", {}),
+    "client-key-rsa": ("ssh-ed25519", "ssh-rsa", {}),
+}
+
+
+class TestSSHTunnelAgainstRealServer:
+    """Run the tunnel against a real in-process asyncssh server (loopback only).
+
+    The mocked test above pins the call shape; this one proves the installed
+    asyncssh and cryptography still authenticate with an OpenSSH key file,
+    verify the host key from ``~/.ssh/known_hosts`` and forward bytes to the
+    target, for each algorithm family the two ends can negotiate.
+    """
+
+    @staticmethod
+    async def _start(
+        tmp_path,
+        monkeypatch,
+        *,
+        trust_server_key: bool,
+        host_key_alg: str = "ssh-ed25519",
+        client_key_alg: str = "ssh-ed25519",
+        server_options: dict | None = None,
+    ):
+        import asyncio
+
+        asyncssh = pytest.importorskip("asyncssh")
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("SSH_AUTH_SOCK", raising=False)
+
+        async def _echo(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            data = await reader.readexactly(4)
+            writer.write(b"echo:" + data)
+            await writer.drain()
+            writer.close()
+
+        target = await asyncio.start_server(_echo, "127.0.0.1", 0)
+        target_port = target.sockets[0].getsockname()[1]
+
+        host_key = asyncssh.generate_private_key(host_key_alg)
+        client_key = asyncssh.generate_private_key(client_key_alg)
+        key_file = tmp_path / "id_client"
+        key_file.write_bytes(client_key.export_private_key())
+
+        class _ForwardingServer(asyncssh.SSHServer):
+            def connection_requested(self, dest_host, dest_port, orig_host, orig_port):
+                return (dest_host, dest_port) == ("127.0.0.1", target_port)
+
+        server = await asyncssh.listen(
+            "127.0.0.1",
+            0,
+            server_factory=_ForwardingServer,
+            server_host_keys=[host_key],
+            authorized_client_keys=asyncssh.import_authorized_keys(client_key.export_public_key().decode()),
+            **(server_options or {}),
+        )
+        ssh_port = server.sockets[0].getsockname()[1]
+
+        known_key = host_key if trust_server_key else asyncssh.generate_private_key(host_key_alg)
+        ssh_dir = tmp_path / ".ssh"
+        ssh_dir.mkdir()
+        (ssh_dir / "known_hosts").write_text(
+            f"[127.0.0.1]:{ssh_port} {known_key.export_public_key().decode().strip()}\n",
+            encoding="utf-8",
+        )
+
+        config = _make_config(
+            ssh_enabled=True,
+            ssh_host="127.0.0.1",
+            ssh_port=ssh_port,
+            ssh_user="deploy",
+            ssh_key_file=str(key_file),
+        )
+        return asyncssh, target, target_port, server, config
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("case", sorted(_SSH_ALGORITHM_CASES))
+    async def test_tunnel_forwards_bytes_through_a_real_ssh_server(self, tmp_path, monkeypatch, case):
+        import asyncio
+
+        host_key_alg, client_key_alg, server_options = _SSH_ALGORITHM_CASES[case]
+        _asyncssh, target, target_port, server, config = await self._start(
+            tmp_path,
+            monkeypatch,
+            trust_server_key=True,
+            host_key_alg=host_key_alg,
+            client_key_alg=client_key_alg,
+            server_options=server_options,
+        )
+        try:
+            ssh_conn, ssh_listener, local_port = await DBManager._start_ssh_tunnel(config, "127.0.0.1", target_port)
+            try:
+                if "encryption_algs" in server_options:
+                    assert ssh_conn.get_extra_info("send_cipher") == server_options["encryption_algs"][0]
+                reader, writer = await asyncio.open_connection("127.0.0.1", local_port)
+                writer.write(b"ping")
+                await writer.drain()
+                assert await asyncio.wait_for(reader.read(), timeout=10) == b"echo:ping"
+                writer.close()
+            finally:
+                ssh_listener.close()
+                ssh_conn.close()
+                await ssh_conn.wait_closed()
+        finally:
+            server.close()
+            await server.wait_closed()
+            target.close()
+            await target.wait_closed()
+
+    @pytest.mark.asyncio
+    async def test_tunnel_refuses_a_server_key_missing_from_known_hosts(self, tmp_path, monkeypatch):
+        asyncssh, target, target_port, server, config = await self._start(tmp_path, monkeypatch, trust_server_key=False)
+        try:
+            with pytest.raises(asyncssh.HostKeyNotVerifiable):
+                await DBManager._start_ssh_tunnel(config, "127.0.0.1", target_port)
+        finally:
+            server.close()
+            await server.wait_closed()
+            target.close()
+            await target.wait_closed()
+
+
 # Integration: start with SSH / SSL
 
 

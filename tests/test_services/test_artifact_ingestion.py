@@ -13,6 +13,7 @@ from koda.services.artifact_ingestion import (
     ArtifactRef,
     ArtifactStatus,
     _cache_path,
+    _extract_direct_video_url,
     _maybe_cleanup_artifact_cache,
     build_local_artifact_bundle,
     extract_artifact,
@@ -25,6 +26,39 @@ def artifact_cache_dir(tmp_path, monkeypatch):
     cache_dir = tmp_path / "artifact_cache"
     monkeypatch.setattr("koda.services.artifact_ingestion.ARTIFACT_CACHE_DIR", cache_dir)
     return cache_dir
+
+
+def _text_pdf(page_texts: list[str]) -> bytes:
+    """Build a small, valid PDF whose pages draw ``page_texts`` in Helvetica.
+
+    Written by hand, with a correct xref table, so the real pypdf reader parses
+    it exactly as it would a user upload; nothing here depends on pypdf's writer.
+    """
+    page_ids = [4 + 2 * index for index in range(len(page_texts))]
+    kids = " ".join(f"{page_id} 0 R" for page_id in page_ids)
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        f"<< /Type /Pages /Kids [{kids}] /Count {len(page_texts)} >>".encode(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    for page_id, text in zip(page_ids, page_texts, strict=True):
+        objects.append(
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            f"/Resources << /Font << /F1 3 0 R >> >> /Contents {page_id + 1} 0 R >>".encode()
+        )
+        content = f"BT /F1 18 Tf 72 720 Td ({text}) Tj ET".encode()
+        objects.append(b"<< /Length %d >>\nstream\n%b\nendstream" % (len(content), content))
+
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n%b\nendobj\n" % (number, body)
+    xref_offset = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    out += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref_offset)
+    return bytes(out)
 
 
 def _ref(path: Path, kind: ArtifactKind, *, mime_type: str = "") -> ArtifactRef:
@@ -665,6 +699,30 @@ class TestArtifactExtraction:
         assert any("No readable text extracted from page 1." in warning for warning in extracted.warnings)
 
     @pytest.mark.asyncio
+    async def test_extract_pdf_reads_text_from_a_real_document(self, tmp_path, artifact_cache_dir):
+        pdf_path = tmp_path / "release.pdf"
+        pdf_path.write_bytes(_text_pdf(["Koda release notes SIM-410", "Rollback plan for SIM-411"]))
+
+        extracted = await extract_artifact(_ref(pdf_path, ArtifactKind.PDF, mime_type="application/pdf"))
+
+        assert extracted.status == ArtifactStatus.COMPLETE
+        assert "[page 1] Koda release notes SIM-410" in extracted.text_content
+        assert "[page 2] Rollback plan for SIM-411" in extracted.text_content
+        assert extracted.citations[:2] == ["release.pdf p.1", "release.pdf p.2"]
+        assert not extracted.warnings
+
+    @pytest.mark.asyncio
+    async def test_extract_pdf_reports_a_corrupt_document_as_unresolved(self, tmp_path, artifact_cache_dir):
+        pdf_path = tmp_path / "broken.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4\nthis is not a PDF body\n")
+
+        extracted = await extract_artifact(_ref(pdf_path, ArtifactKind.PDF, mime_type="application/pdf"))
+
+        assert extracted.status == ArtifactStatus.UNRESOLVED
+        assert extracted.summary == "Could not extract broken.pdf."
+        assert extracted.warnings
+
+    @pytest.mark.asyncio
     async def test_extract_spreadsheet_summarizes_hidden_sheets_and_formulas(self, tmp_path, artifact_cache_dir):
         from openpyxl import Workbook
 
@@ -694,6 +752,42 @@ class TestArtifactExtraction:
         assert "state=hidden" in extracted.text_content
         assert "FORMULA(=SUM(1,2))" in extracted.text_content
         assert extracted.metadata["sheet_count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_extract_spreadsheet_refuses_xml_entity_declarations(self, tmp_path, artifact_cache_dir):
+        """An uploaded workbook's XML is parsed through defusedxml, so a declared entity is never expanded."""
+        import io
+        import zipfile
+
+        from openpyxl import Workbook
+
+        buffer = io.BytesIO()
+        workbook = Workbook()
+        workbook.active["A1"] = "placeholder"
+        workbook.save(buffer)
+        xlsx_path = tmp_path / "entity.xlsx"
+        with zipfile.ZipFile(io.BytesIO(buffer.getvalue())) as source, zipfile.ZipFile(xlsx_path, "w") as target:
+            for item in source.infolist():
+                data = source.read(item.filename)
+                if item.filename == "xl/worksheets/sheet1.xml":
+                    text = data.decode()
+                    text = text.replace("<worksheet", '<!DOCTYPE worksheet [<!ENTITY koda "EXPANDED">]><worksheet', 1)
+                    start = text.index('<c r="A1"')
+                    end = text.index("</c>", start) + len("</c>")
+                    text = text[:start] + '<c r="A1" t="inlineStr"><is><t>&koda;</t></is></c>' + text[end:]
+                    data = text.encode()
+                target.writestr(item, data)
+
+        extracted = await extract_artifact(
+            _ref(
+                xlsx_path,
+                ArtifactKind.SPREADSHEET,
+                mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        )
+
+        assert "EXPANDED" not in (extracted.text_content or "")
+        assert extracted.status == ArtifactStatus.UNRESOLVED
 
     @pytest.mark.asyncio
     async def test_extract_image_preserves_visual_path_and_ocr(self, tmp_path, artifact_cache_dir):
@@ -938,6 +1032,51 @@ class TestArtifactExtraction:
         assert extracted.status == ArtifactStatus.PARTIAL
         assert extracted.ref.kind == ArtifactKind.VIDEO
         assert "could not be fully extracted automatically" in extracted.summary
+
+
+class TestDirectVideoUrlSelectors:
+    """The CSS selectors (soupsieve, through BeautifulSoup) that find a page's direct video URL."""
+
+    @pytest.mark.parametrize(
+        ("html", "expected"),
+        [
+            (
+                '<html><head><meta property="og:video" content="/media/a.mp4"></head></html>',
+                "https://example.com/media/a.mp4",
+            ),
+            (
+                '<head><meta property="og:video:url" content="https://cdn.example.com/b.mp4"></head>',
+                "https://cdn.example.com/b.mp4",
+            ),
+            (
+                '<head><meta property="og:video:secure_url" content="//cdn.example.com/c.mp4"></head>',
+                "https://cdn.example.com/c.mp4",
+            ),
+            (
+                '<head><meta name="twitter:player:stream" content="d.mp4"></head>',
+                "https://example.com/watch/d.mp4",
+            ),
+            ('<body><video><source src="e.webm" type="video/webm"></video></body>', "https://example.com/watch/e.webm"),
+            # og:video outranks a <source> that comes first in the document.
+            (
+                '<body><video><source src="late.mp4"></video></body><meta property="og:video" content="/first.mp4">',
+                "https://example.com/first.mp4",
+            ),
+        ],
+    )
+    def test_finds_the_direct_video_url(self, html, expected):
+        assert _extract_direct_video_url(html, "https://example.com/watch/page") == expected
+
+    @pytest.mark.parametrize(
+        "html",
+        [
+            "<html><body><p>No video here</p></body></html>",
+            '<head><meta property="og:video" content=""></head>',
+            '<head><meta property="og:videos" content="/wrong.mp4"><meta name="og:video" content="/x.mp4"></head>',
+        ],
+    )
+    def test_returns_none_without_a_usable_video_url(self, html):
+        assert _extract_direct_video_url(html, "https://example.com/watch/page") is None
 
 
 class TestYtDlpOnlySeesCanonicalWatchUrls:

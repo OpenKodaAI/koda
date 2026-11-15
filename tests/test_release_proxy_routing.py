@@ -769,7 +769,7 @@ def test_every_other_route_keeps_nginx_default_body_limit(nginx: NginxModel, rou
     A larger limit on any request the dashboard gets reaches it before any authentication: the
     photo routes without a bearer token, the sign-in, setup and runtime routes, and every page. The
     dashboard's Next.js proxy buffers each body ahead of its route handlers and rate limiter (up to
-    proxyClientMaxBodySize, 10 MiB in next 16.2.6), so a client without a session could make it hold
+    proxyClientMaxBodySize, 10 MiB in next 16.4.6), so a client without a session could make it hold
     about 10 MiB per request where nginx answers 413 at 1 MiB. The dashboard's own photo uploads fit
     the default (test_the_dashboard_photo_editors_fit_nginx_default_body_limit).
     """

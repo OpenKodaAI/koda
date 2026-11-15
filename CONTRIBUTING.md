@@ -18,6 +18,16 @@ pnpm test:web
 pnpm build:web
 ```
 
+Koda needs `cryptography` 50.0.2 or later for security fixes. Its wheels cover
+Apple silicon macOS, x86-64 Windows and Linux on x86-64, ARM64, ARMv7 and
+ppc64le, which includes the Docker images. Elsewhere, including Intel (x86_64)
+macOS, 32-bit Windows and Windows on ARM with an ARM64 Python, the install
+builds it from source. That needs Rust, OpenSSL and a C compiler: on macOS, the
+Xcode command line tools (`xcode-select --install`) and
+`brew install openssl@3 rust`; on Windows, the Microsoft C++ Build Tools, Rust
+from rustup and an OpenSSL build that `OPENSSL_DIR` points to. See
+[cryptography's installation guide](https://cryptography.io/en/latest/installation/).
+
 For product-facing local work, prefer the Docker-first stack documented in:
 
 - [README.md](README.md)
@@ -64,6 +74,12 @@ run fails under `CI`). To reuse one already-running guard across several checkou
 unreachable. A shared guard runs whatever build it was started from, so do not share one when
 validating changes to `rust/koda-security-*`. `KODA_SECURITY_GUARD_STARTUP_TIMEOUT` (seconds)
 raises the startup wait for cold builds.
+
+The session's guard, the Rust binaries the integration tests start and the nginx of the proxy
+smoke test each run under a small watchdog (`tests/_owned_process.py`). It checks ten times a
+second whether the pytest process is gone and then stops them, even when pytest was killed before
+its teardown could run. Start any new long-lived test process with `spawn_owned` and stop it with
+`stop_owned`, not with a bare `subprocess.Popen`.
 
 Each test also gets its own empty `HOME` (with `CLAUDE_CONFIG_DIR` and `CODEX_HOME` unset), so a
 test never reads or deletes your files. Provider disconnect tests remove CLI login files under
@@ -133,6 +149,7 @@ When a CI failure happens:
 - keep changes scoped and reviewable
 - include tests when behavior changes
 - update public docs when installation, APIs, or operator workflows change
+- add a `CHANGELOG.md` entry under `## [Unreleased]` for a change users, operators or API clients can notice (see [docs/reference/releases.md](docs/reference/releases.md#changelog))
 - update repository guidance when architecture or contributor-facing workflows change
 - do not commit local runtime state, caches, secrets, or machine-specific paths
 

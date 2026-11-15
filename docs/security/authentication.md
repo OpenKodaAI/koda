@@ -14,10 +14,25 @@ mechanisms, checked in priority order:
 
 1. **Legacy registration token** — obtained via `koda auth issue-code`, then
    `POST /api/control-plane/auth/bootstrap/exchange`. Still supported for automated installs.
-2. **Bootstrap code (recommended for VPS)** — on first boot the control plane writes
-   `${STATE_ROOT_DIR}/control_plane/bootstrap.txt` (mode `0600`) and prints a generated code to
-   the container log once (never a `CONTROL_PLANE_BOOTSTRAP_CODE` seed). The operator SSHs in, reads the file, pastes it into `/setup`, and the
-   file is deleted after registration.
+2. **Bootstrap code (recommended for VPS)** — while no owner exists, the control plane writes
+   `${STATE_ROOT_DIR}/control_plane/bootstrap.txt` (mode `0600`) at the first auth or onboarding
+   status request (the setup screen and the CLI make one right away), and prints a generated code
+   once, in a banner on stderr, which is part of the container log (never a
+   `CONTROL_PLANE_BOOTSTRAP_CODE` seed, and never in the structured log). The operator SSHs in,
+   reads the file or the banner, pastes the code into `/setup`, and the file is deleted after
+   registration. The code expires `CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS` (default 900, so
+   15 minutes) after the file is written. The next status request after that, such as reloading
+   `/setup`, replaces the expired file with a new code and a new banner (a seed is written again,
+   with a fresh expiry). A file without both a code line and a readable `expires_at`, such as an
+   empty one left by a crash or one that is not UTF-8, never matches and is replaced the same way,
+   so an expired or damaged file does not lock setup. The code is the file's first line, whatever
+   it holds (a seed may contain `=` or any other separator), and `expires_at` is read from the
+   lines after it. The file is published whole: the content goes to a `0600` temp file in the same
+   directory, is fsynced, then is hard-linked to `bootstrap.txt`, which fails when that file already
+   exists. Writers read, check, replace and publish the file under an `flock` on `.bootstrap.lock`
+   beside it, so when replicas race at expiry one replaces the file and the others keep it. Another
+   replica never reads a half-written file, a code is announced only when its file is the one on
+   disk, and a write that fails leaves no file. An install with an owner never writes the file.
 3. **Loopback trust (dev only)** — when `ALLOW_LOOPBACK_BOOTSTRAP=true` and the request comes
    from `127.0.0.1` / `::1` with no `X-Forwarded-For` hop, no code is required. This mode is
    refused at boot when `KODA_ENV=production`.
@@ -45,9 +60,10 @@ exactly 12 characters from that alphabet, separators aside (fewer is weaker than
 `Wb7k-Qz3m-Np4x` is typed and matched as `WB7K-QZ3M-NP4X`. A seed with more letters and digits, or with `I`, `O`, `0` or `1`, can only be sent
 to the API (`POST /api/control-plane/auth/register-owner`): the `/setup` field would submit fewer
 characters than the seed has, and the code would not match. When the control plane writes
-`bootstrap.txt`, its `bootstrap_file_written` log line carries a generated code, once, but never a
-seed: for a seed it names `code_source=CONTROL_PLANE_BOOTSTRAP_CODE` instead, as the operator
-already knows the code. From a seed it also logs a `bootstrap_code_seed_weak` warning when the seed
+`bootstrap.txt`, it prints a generated code once, in a banner on stderr, never a seed. The
+structured log never carries the code: its `bootstrap_file_written` event names
+`code_source=generated` or `code_source=CONTROL_PLANE_BOOTSTRAP_CODE` instead, as the operator
+chose a seed. From a seed it also logs a `bootstrap_code_seed_weak` warning when the seed
 has fewer than 12 ASCII letters and digits (a generated code has 12) and a
 `bootstrap_code_seed_not_typeable` warning when the `/setup` field cannot take it, neither with the
 seed; a seed with no ASCII letter or digit never matches.
@@ -148,8 +164,11 @@ proxy at `5174` is defence in depth, not the only line of defence: `apps/web/src
 unseals the operator-session cookie and forwards the bearer token to the backend, so the
 normal dashboard flow is unaffected.
 
-The middleware checks only `/api/control-plane/*`. The supervisor's other routes (`/`, `/setup`,
-`/health`, `/openapi/control-plane.json` and the `/cluster/*` deploy hooks) answer without a
+Outside `/api/control-plane/*` the middleware checks only the two cluster-mode deploy hooks that
+change state, `POST /cluster/drain` and `POST /cluster/undrain`
+([Cluster mode](../operations/cluster-mode.md)), with the same bearer check: without a valid
+token they answer `401` and change nothing. The supervisor's other routes (`/`, `/setup`,
+`/health`, `/openapi/control-plane.json` and `GET /cluster/status`) answer without a
 session. `tests/test_control_plane_auth_matrix.py` sends a request to every route the supervisor
 registers, through its own middleware stack, without a session and with one. It fails when a
 route answers without a session and the OpenAPI document does not let that operation through
@@ -215,6 +234,15 @@ every field and the operator's profile.
   The dashboard's production build always sets `Secure` on its cookies; there is no switch
   for it (`ALLOW_INSECURE_COOKIES` only works in development). See
   [Plain HTTP](#plain-http) for what happens when the browser cannot keep them.
+- Runtime relays: the terminal, browser-snapshot and noVNC WebSockets at
+  `/api/runtime/relay/<id>` read the same cookie on the upgrade, before the handshake
+  (`apps/web/src/lib/runtime-relay-server.mjs`). A relay admits only the session that attached
+  it, and the token is never taken from the URL. The upgrade's `Origin` must also match the
+  `Host` header and `X-Forwarded-Proto` (403 otherwise): the `SameSite=Strict` cookie still
+  reaches a page on another origin of the same site. This is stricter than the check on other
+  changes (`apps/web/src/lib/request-origin.ts`), which also admits a matching `Referer` or
+  `Sec-Fetch-Site: same-origin` when the `Origin` does not match: a browser always sends `Origin`
+  with a WebSocket handshake, so the relay takes nothing else.
 - Revocation: logout revokes the current session. Password _change_ revokes every other
   session for the same user and keeps the initiating session alive. Password _reset_ via
   recovery code revokes **all** sessions for the user.
@@ -436,9 +464,19 @@ message would reveal that the account exists.
   [Rate limits](#rate-limits-bucket-budgets)), and the plain-HTTP refusal
   (`error.code: "INSECURE_TRANSPORT"`), which the dashboard decides from the transport before
   it reads any credential (see [Plain HTTP](#plain-http)).
-- The structured logging pipeline redacts `password`, `new_password`, `current_password`,
-  `recovery_code`, `session_token`, `registration_token`, `bootstrap_code`, `code`,
-  `totp_secret`, `api_key`, `secret`, `token`, `authorization`, and `cookie` keys.
+- The control plane (`python -m koda.control_plane`) configures the structured logging pipeline
+  (`setup_logging` in `koda/logging_config.py`) before anything logs; the agent workers configure
+  it at startup. `LOG_FORMAT=json` writes one JSON object per line on stdout; any other value
+  writes console lines. The pipeline replaces with `***` the value of these top-level event keys,
+  in any case: `password`, `new_password`, `current_password`, `recovery_code`, `session_token`,
+  `registration_token`, `bootstrap_code`, `code`, `totp_secret`, `api_key`, `apikey`, `secret`,
+  `private_key`, `token`, `authorization` and `cookie`. It does not look inside nested values, and
+  records from the standard `logging` module, such as third-party libraries', are formatted (with
+  the same `level`, `logger` and `timestamp` keys) but not redacted. Both formats print an
+  exception's plain traceback, its type, message and stack, without local variables: a console
+  line prints it below the event, and a JSON line carries it as a string in its `exception` key.
+  In the control plane, aiohttp's access log stays off, because its request lines carry query
+  strings such as the authorization code of an MCP OAuth callback.
 
 ## Security headers
 

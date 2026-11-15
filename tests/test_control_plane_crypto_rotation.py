@@ -130,6 +130,24 @@ class TestCryptoRotation:
             clear_fernet_cache()
             assert decrypt_secret(ciphertext) == plaintext
 
+    # Encrypted by cryptography 48.0.1 (Fernet.encrypt_at_time); secrets stored
+    # before a cryptography upgrade must still decrypt after it.
+    _CRYPTOGRAPHY_48_KEY = b"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+    _CRYPTOGRAPHY_48_TOKEN = (
+        "gAAAAABrSdIA-JlJDM93mCle130av2000Jj29Kz4NFu0xmRxulmmkrD5rCyDqZ1yMECvnPHVOw6szf0J3c15U2uLd9sQOodmUg=="
+    )
+
+    def test_decrypts_a_secret_stored_by_an_earlier_cryptography_release(self):
+        with (
+            patch("koda.control_plane.crypto._load_master_key", return_value=self._CRYPTOGRAPHY_48_KEY),
+            patch("koda.control_plane.crypto._load_previous_master_key", return_value=None),
+        ):
+            from koda.control_plane.crypto import clear_fernet_cache, decrypt_secret, encrypt_secret
+
+            clear_fernet_cache()
+            assert decrypt_secret(self._CRYPTOGRAPHY_48_TOKEN) == "koda-secret-v48"
+            assert decrypt_secret(encrypt_secret("koda-secret-v48")) == "koda-secret-v48"
+
     def test_decrypt_falls_back_to_previous_key(self):
         old_key = Fernet.generate_key()
         new_key = Fernet.generate_key()

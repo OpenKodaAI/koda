@@ -66,7 +66,7 @@ jump ahead of high-severity items in a later milestone just because of their mil
 | `TD-NNN` | Debt item in TECHNICAL_DEBT.md Part 2 |
 | `SM-NN` | Runtime-smoke defect FEATURE_MATRIX.md §3.4 `D-NN` (renamed here to avoid a clash with `D-NNN`) |
 | `J-NN` | Journey in FEATURE_MATRIX.md §3.2 |
-| `Q-n` | Open decision `D-n` in ARCHITECTURE_AUDIT.md §11 (renamed here). Q-21 to Q-27 are added in section 5. |
+| `Q-n` | Open decision `D-n` in ARCHITECTURE_AUDIT.md §11 (renamed here). Q-21 to Q-29 are added in section 5. |
 | `P<n>` | Design principle in REFERENCE_RESEARCH.md §6 |
 | `ADR-NNN` | Entry in DECISIONS.md |
 | `R-NN` | Entry in REMAINING_RISKS.md |
@@ -284,6 +284,8 @@ in `koda/knowledge`). Both are cheap to leave; revisit only if the code is touch
 | Q-25 | Should provider failover ask the operator before switching? (P22) | No: keep the automatic switch, and M6-E3-T8 makes it visible | open (§13: changes configured fallback behaviour) | none until decided |
 | Q-26 | Structured operator questions with options? (P21) | No, until a requirement exists | open | none |
 | Q-27 | Project-scope MCP configs (`.mcp.json`, `.gemini/settings.json`, `.codex/config.toml`, `.codex/*.config.toml`) are refused by the file tools and `/cat` wherever they sit, as `.env` and `*.pem` are (WAVE-2A) | Keep: they hold MCP secrets in clear text; the alternative refuses only the HOME copies and needs a path-anchored rule | open (§13: changes what agents and operators can read in a project) | none |
+| Q-28 | With `KNOWLEDGE_V2_STORAGE_MODE=off` (not the default), M4-E1-T6 removed four side effects that ran before retrieval raised on every turn: pack and workspace sources registered, artifact evidence written and read. The artifact-evidence table was never created, so those writes and reads never stored or returned a row | Accept the removal (applied; rollback: revert the manager.py and storage_v2.py parts of b845d89 and f989685) | open (§13 confirmation of ADR-015's interim approval; the default is applied) | none |
+| Q-29 | Release v1.0.18 stopped at `publish-npm` (run 26138278216): the GitHub release is a draft and the seven GHCR images are published, but npm still serves the previous version | Ship the next version normally and keep the CHANGELOG note; republishing 1.0.18 needs the npm credentials and a release run | open (§13: production release and credentials) | none |
 
 ### 5.2 Approvals required
 
@@ -719,12 +721,12 @@ Owner SEC · Risk med · Gate none · **done** · Deps —
 - **Tests:** route test in both states; web unit test; route matrix updated; G; changelog entry · **Evidence:** VALIDATION_REPORT.md "LIVE-REPLAY-1" (unauthenticated onboarding/status returns exactly {has_owner, bootstrap_required} through :3000-equivalent and :8090-equivalent ports; J-01 and J-03 work in a real browser, run and independently re-run); VALIDATION_REPORT.md "WAVE-2B" (route tests in both states for onboarding/status and auth/status; live readiness checks; one public-path list with exact matching; web tests). J-01 and J-03 not yet replayed live (no Docker)
 
 #### M1-E1-T4 · Control-plane logging with redaction
-Owner SEC · Risk low · Gate none · **ready** · Deps —
+Owner SEC · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-049, SM-03, F-GOV-19, R-37
 - **Files:** `koda/control_plane/__main__.py`, `launcher.py` (removed later in M4-E2-T3), `koda/logging_config.py:120`, `docs/security/authentication.md`
 - **Do:** call `setup_logging()` before anything logs. Turn off rich `show_locals` outside debug. Make the bootstrap code appear once in a console banner and be redacted in structured logs, and match the doc to that.
 - **Done when:** `LOG_FORMAT=json` takes effect, and the setup code does not appear in structured logs or in tracebacks.
-- **Tests:** log-capture unit test of the control-plane entrypoint; G · **Evidence:** —
+- **Tests:** log-capture unit test of the control-plane entrypoint; G · **Evidence:** VALIDATION_REPORT.md "Lane merges 2026-11-15": the control plane configures redacting structured logs at startup, LOG_FORMAT=json keeps exceptions, the setup code and secrets never reach logs (e046426, 57ca0f0)
 
 #### M1-E1-T5 · Failed logins return 401
 Owner SEC · Risk med · Gate none · **pending** · Deps M0-E3-T1, M0-E3-T6
@@ -748,7 +750,7 @@ Owner SEC · Risk low · Gate none · **pending** · Deps M0-E3-T6
 - **Files:** `koda/control_plane/bootstrap_file.py` (~95), `docs/security/authentication.md`
 - **Do:** count the bootstrap TTL from the time the file was written, and regenerate the file when it has expired and no owner exists.
 - **Done when:** with an injected clock, a file past its TTL is replaced by a new code at the next start, and an owner-exists install never writes one.
-- **Tests:** unit tests with an injected clock; G · **Evidence:** —
+- **Tests:** unit tests with an injected clock; G · **Evidence:** VALIDATION_REPORT.md "Lane merges 2026-11-15": an expired or unusable bootstrap file is replaced while no owner exists, published atomically under a lock; a seed with "=" reads back (2755e3a, 1454428, 70faf35, e7495bb)
 
 #### M1-E1-T15 · Authenticate the cluster drain endpoints
 Owner SEC (OPS) · Risk low · Gate none · **pending** · Deps M0-E3-T1
@@ -756,7 +758,7 @@ Owner SEC (OPS) · Risk low · Gate none · **pending** · Deps M0-E3-T1
 - **Files:** `koda/control_plane/supervisor.py` (~231), `docs/security/cluster-mode.md`
 - **Do:** `/cluster/drain` and `/cluster/undrain` require the operator bearer token, like every other privileged route. This stands whether Q-1 keeps or removes cluster mode.
 - **Done when:** both routes return 401 without a token, and the route matrix covers `/cluster/*`.
-- **Tests:** route matrix; unit test; G · **Evidence:** —
+- **Tests:** route matrix; unit test; G · **Evidence:** VALIDATION_REPORT.md "Lane merges 2026-11-15": /cluster/drain and /cluster/undrain answer 401 without the operator bearer; docs and smoke send the token on stdin (1b40d38, 33cd02b)
 
 #### M1-E1-T6 · Secret-handling correctness fixes
 Owner SEC · Risk low · Gate none · **done** · Deps —
@@ -1174,12 +1176,12 @@ Owner OPS (SEC) · Risk med · Gate infra: Docker (evidence from CI) · **ready*
 - **Tests:** hygiene test; G; G-CI · **Evidence:** —
 
 #### M1-E7-T2 · Remediate Python advisories
-Owner SEC · Risk med · Gate none · **ready** · Deps M0-E4-T1
+Owner SEC · Risk med · Gate none · **done** · Deps M0-E4-T1
 - **Addresses:** R-03
 - **Files:** `pyproject.toml`, `uv.lock`
 - **Do:** upgrade reachable critical and high findings first. Record unreachable ones with a reason. Apply SUPPLY_CHAIN_TRIAGE.md §5 batches P1–P5 in order, one commit per batch, each with its listed gates and regression checks.
 - **Done when:** no reachable critical or high Python advisory remains, or each remaining one is risk-accepted in REMAINING_RISKS.md.
-- **Tests:** G, G-PG; `pip-audit` · **Evidence:** —
+- **Tests:** G, G-PG; `pip-audit` · **Evidence:** VALIDATION_REPORT.md "WAVE-5": batches P1–P5 applied; a fresh `pip-audit --strict` on the lock and on the `--no-dev` export shows no advisory; the dev overlay builds its own locked dev image
 
 #### M1-E7-T3 · Remediate Node advisories
 Owner SEC (FE) · Risk med · Gate none · **ready** · Deps M0-E4-T1
@@ -1211,12 +1213,12 @@ Owner OPS · Risk med · Gate none · **ready** · Deps —
 - **Tests:** release metadata tests; G · **Evidence:** —
 
 #### M1-E7-T6 · Remove foreign files from HEAD
-Owner OPS · Risk low · Gate none · **ready** · Deps —
+Owner OPS · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-128, D-084, TD-179, R-15
 - **Files:** `main-BwqrdVu3.js`, `app-server-manager-signals-BEaGjuc8.js`, `CHANGELOG.md`, `tests/test_open_source_hygiene.py`
 - **Do:** `git rm` both bundles. Replace the changelog with Koda's own, starting at 1.0.18. Add a hygiene test that bans root-level `*.js` and foreign changelog headers.
 - **Done when:** the files are gone and the test guards against their return.
-- **Tests:** hygiene test; G · **Evidence:** —
+- **Tests:** hygiene test; G · **Evidence:** VALIDATION_REPORT.md "WAVE-5": both bundles and the foreign changelog removed (5c30e75); Koda CHANGELOG.md starts at 1.0.18; hygiene tests ban root-level `*.js` and foreign changelog titles (08fe113)
 
 #### M1-E7-T7 · Purge vendor bundles from git history
 Owner OPS · Risk high · Gate needs-approval (§13: irreversible history rewrite; Q-17 licensing review) · **blocked** · Deps M1-E7-T6
@@ -1965,12 +1967,12 @@ Owner AIM · Risk low · Gate none · **ready** · Deps —
 - **Tests:** G, G-PG · **Evidence:** —
 
 #### M4-E1-T6 · Dead knowledge paths
-Owner AIM · Risk low · Gate none · **ready** · Deps —
+Owner AIM · Risk low · Gate none · **done** · Deps —
 - **Addresses:** TD-086, TD-088, TD-091
 - **Files:** `koda/knowledge/manager.py` (ranges in TD-086), `koda/knowledge/storage_v2.py`, `koda/knowledge/v2/common.py` (~111-273), `koda/knowledge/v2/*_store.py`, `koda/knowledge/evaluation.py` (~186-357)
 - **Do:** remove the local and OFF retrieval paths and the storage-mode wrappers, keeping today's fire-and-forget write behaviour. Delete the uncalled evaluation helpers. Making write failures surface is M7-E1-T7.
 - **Done when:** PRIMARY mode behaves as before, shown by the existing knowledge tests and one new characterisation test of a failing write.
-- **Tests:** G, G-PG · **Evidence:** —
+- **Tests:** G, G-PG · **Evidence:** VALIDATION_REPORT.md "Lane merges 2026-11-15": the local and OFF retrieval paths, storage-mode wrappers and uncalled evaluation helpers are removed (b845d89, f989685, 2de74bf); PRIMARY mode unchanged and pinned by a new test; OFF-mode side effects recorded under Q-28
 
 #### M4-E1-T7 · Dead squad, bus and skills code
 Owner AIM · Risk low · Gate none · **ready** · Deps —
@@ -1989,12 +1991,12 @@ Owner BE · Risk low · Gate none · **ready** · Deps —
 - **Tests:** G · **Evidence:** —
 
 #### M4-E1-T9 · Duplicate MCP catalog and decrypt helpers
-Owner BE · Risk low · Gate none · **ready** · Deps —
+Owner BE · Risk low · Gate none · **done** · Deps —
 - **Addresses:** TD-034, TD-044, F-SKL-29
 - **Files:** `koda/control_plane/mcp_catalog.py`, `tests/test_mcp_catalog_contract.py`, `koda/services/mcp_connection_broker.py`, `koda/services/mcp_bootstrap.py`, `koda/control_plane/manager.py` (`_decrypt_mcp_env_values`)
 - **Do:** delete the copy that only a test uses, and keep `koda/integrations/mcp_catalog.py`. Keep one decrypt helper.
 - **Done when:** one catalog module and one decrypt helper remain.
-- **Tests:** G · **Evidence:** —
+- **Tests:** G · **Evidence:** VALIDATION_REPORT.md "Lane merges 2026-11-15": one MCP catalog module and one env decrypt helper used everywhere (de5d1fe, 17aa6b8, 54dd586)
 
 #### M4-E1-T10 · Non-functional webhook tools
 Owner BE · Risk low · Gate none · **ready** · Deps —
@@ -2027,6 +2029,14 @@ Owner AIM · Risk low · Gate none · **ready** · Deps —
 - **Do:** first prove the adjusted chain is never applied (grep and a characterisation test of the provider chain). Then delete the function and its configuration keys.
 - **Done when:** the names are absent, the provider-chain characterisation test passes unchanged, and the docs no longer list the keys.
 - **Tests:** G; changelog entry (removed configuration keys) · **Evidence:** —
+
+#### M4-E1-T14 · Artifact evidence writes to a missing table
+Owner AIM · Risk low · Gate none · **ready** · Deps —
+- **Addresses:** D-260
+- **Files:** `koda/knowledge/repository.py` (`batch_upsert_artifact_evidence`), `koda/knowledge/graph_materializer.py` (~89), `koda/services/queue_manager.py` (`_persist_artifact_evidence_nodes` and its call site)
+- **Do:** prove no schema creates `artifact_evidence_nodes` and no reader uses it (grep and a Postgres check). Then delete the write path and its callers.
+- **Done when:** the names are absent, no code references the table, and the queue and knowledge tests pass unchanged.
+- **Tests:** G, G-PG · **Evidence:** —
 
 #### M4-E2 — Rust and infrastructure
 
@@ -2063,7 +2073,7 @@ Owner OPS · Risk low · Gate none · **ready** · Deps —
   - keep one dev-dependency list and drop the empty `teams` extra;
   - drop the unused mypy overrides;
   - drop the dead Dockerfile preload and the unused `tmp-images` volume;
-  - declare watchfiles as a dev dependency instead of a runtime `pip install`.
+  - declare watchfiles as a dev dependency instead of a runtime `pip install` (done by M1-E7-T2: ff0dbad, 00dd00c).
 - **Done when:** manifests are single-sourced, and the hygiene tests are updated.
 - **Tests:** G; G-CI image build; changelog entry (`requirements.txt` removed) · **Evidence:** —
 
@@ -3105,12 +3115,12 @@ Owner QA (UX) · Risk low · Gate infra: Docker for the full stack (CI) · **pen
 #### M8-E2 — Navigation and shell
 
 #### M8-E2-T1 · Mobile navigation on `/sessions`; AppShell branches
-Owner FE (UX) · Risk low · Gate none · **ready** · Deps —
+Owner FE (UX) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-117, TD-135, F-WEB-04
 - **Files:** `apps/web/src/components/layout/app-shell.tsx` (~28-104, ~152)
 - **Do:** add a menu trigger on `/sessions` below `lg`, and collapse the per-route branches into the route registry flags.
 - **Done when:** mobile users can leave `/sessions`, and the dead branches are gone.
-- **Tests:** web tests; Playwright mobile viewport (CI) · **Evidence:** —
+- **Tests:** web tests; Playwright mobile viewport (CI) · **Evidence:** VALIDATION_REPORT.md "Lane merges 2026-11-15": mobile users can leave /sessions; AppShell reads route flags (711ab6d); approved in WAVE-6 review
 
 #### M8-E2-T2 · Quick actions start the action they name
 Owner FE · Risk low · Gate none · **ready** · Deps —
@@ -3246,12 +3256,12 @@ Owner UX · Risk low · Gate none · **pending** · Deps M8-E5-T6
 - **Tests:** web tests; G · **Evidence:** —
 
 #### M8-E5-T2 · One error and empty state
-Owner UX · Risk low · Gate none · **ready** · Deps —
+Owner UX · Risk low · Gate none · **done** · Deps —
 - **Addresses:** TD-129, F-WEB-12
 - **Files:** `components/ui/async-feedback.tsx` (~167), `ui/route-error-state.tsx`, `app/{,control-plane,memory,runtime,sessions}/error.tsx`
 - **Do:** one component, and one `error.tsx` factory parameterised by i18n keys.
 - **Done when:** the five copies collapse to one.
-- **Tests:** web tests · **Evidence:** —
+- **Tests:** web tests · **Evidence:** VALIDATION_REPORT.md "Lane merges 2026-11-15": one error state and one error.tsx factory (f54b2b3); approved in WAVE-6 review
 
 #### M8-E5-T3 · Tokens adopted; design guide synced
 Owner UX · Risk med · Gate none · **ready** · Deps —

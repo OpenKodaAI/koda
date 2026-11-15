@@ -29,6 +29,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import hmac
+import logging
 import stat
 from pathlib import Path
 from types import SimpleNamespace
@@ -696,9 +697,16 @@ def test_control_plane_main_exits_with_the_refusal_guidance(monkeypatch: pytest.
 
     monkeypatch.setattr(main_mod, "ensure_browser_installed_in_background", lambda: None)
     monkeypatch.setattr(main_mod, "run_supervisor", _refuse)
+    # The real configure_logging() replaces the root handlers and configures structlog for the
+    # rest of the session; tests/test_control_plane_entrypoint_logging.py runs it in a subprocess.
+    monkeypatch.setattr(main_mod, "configure_logging", lambda: None)
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
 
     with pytest.raises(SystemExit) as excinfo:
         main_mod.main()
 
     assert "refused to start" in str(excinfo.value.code)
     assert "restore the key from backup" in str(excinfo.value.code)
+    # main() must not leave production logging on the test session's root logger.
+    assert (root.handlers, root.level) == (handlers, level)
