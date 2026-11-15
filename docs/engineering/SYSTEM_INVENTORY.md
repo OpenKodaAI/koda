@@ -68,8 +68,8 @@ Rows without a label come from `read` unless stated otherwise.
 | `buf.yaml`, `buf.gen.yaml` | Proto lint and Python codegen | `buf.yaml` is `v1beta1` (deprecated) |
 | `launcher.py` | Second entry to `run_supervisor()` | duplicates the `koda` console script |
 | `koda.service.example` | systemd unit running `docker compose up -d` in `/opt/koda` | |
-| `main-BwqrdVu3.js`, `app-server-manager-signals-BEaGjuc8.js` | 1.21 MB and 408 KB minified third-party bundles, tracked | section 3.15 |
-| `CHANGELOG.md` | Changelog of `@googleworkspace/cli`, not Koda | `inv` |
+| `main-BwqrdVu3.js`, `app-server-manager-signals-BEaGjuc8.js` | 1.21 MB and 408 KB minified third-party bundles; removed from HEAD by M1-E7-T6 (5c30e75), history purge is M1-E7-T7 | section 3.15 |
+| `CHANGELOG.md` | Koda changelog from 1.0.18 (M1-E7-T6); it replaced the `@googleworkspace/cli` changelog | `inv` |
 | `AGENTS.md`, `CLAUDE.md` | Agent guides; near-identical, differ from line 73 | `inv` |
 
 ### 3.2 Python backend (`koda/`)
@@ -327,7 +327,7 @@ Undocumented operator surfaces: the requirement that every agent have a Telegram
 | Issue | Evidence |
 |---|---|
 | `main-BwqrdVu3.js` (1.21 MB) and `app-server-manager-signals-BEaGjuc8.js` (408 KB) tracked at the root, added in `437f98f`; specialists identified them as OpenAI Codex desktop (Electron) bundles. Licensing and history purge are open. | `inv` (tracked, size, commit); origin `read` |
-| `CHANGELOG.md` is the `@googleworkspace/cli` changelog | `inv` |
+| `CHANGELOG.md` was the `@googleworkspace/cli` changelog; replaced by M1-E7-T6 | `inv` |
 | `requirements.txt` mirrors `pyproject.toml`, kept in sync only by `tests/test_open_source_hygiene.py:174`; Snyk already exports from uv | `inv` (contents) |
 | `ci.yml` dead stub | `inv` |
 | `launcher.py` duplicates the console script | `inv` |

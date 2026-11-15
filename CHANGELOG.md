@@ -216,6 +216,9 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   Compose does. (M1-E8-T3)
 - A setup code with a non-ASCII character gets the generic error instead of a 500 from
   owner registration. (M1-E1-T17)
+- Knowledge: with `KNOWLEDGE_V2_STORAGE_MODE=off`, the agent no longer queries the
+  never-created `artifact_evidence_nodes` table, so asset references come back in
+  that mode. (M4-E1-T6)
 
 ## [1.0.18] - 2026-05-20
 

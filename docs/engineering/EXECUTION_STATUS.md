@@ -106,7 +106,7 @@ Learned from waves 2A–7 and the ADR-002 rounds. Every workflow script follows 
 - CLI recovery (`packages/cli/bin/koda.mjs:629`) sends the raw comma-separated `CONTROL_PLANE_API_TOKEN` as bearer → breaks during `new,old` rotation.
 - Internal gRPC sidecars are unauthenticated on the `backend` network.
 - Packaged install dir `~/.koda` and a source checkout named `koda` share the compose project name `koda` (same volume names); needs a pinned, distinct project name plus an install migration.
-- `CHANGELOG.md` is the changelog of an unrelated project (`@googleworkspace/cli`); needs replacing with Koda's own.
+- `CHANGELOG.md` was the changelog of an unrelated project; M1-E7-T6 replaced it with Koda's own, starting at 1.0.18.
 - Web build had one transient Turbopack `next/font/google` resolution failure (passed on retry); watch for recurrence.
 
 ## Blocked tasks
