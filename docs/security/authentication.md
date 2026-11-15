@@ -94,6 +94,16 @@ setup code: `POST /api/control-plane/auth/bootstrap/exchange` already consumed t
 code, so a retry with it fails with `Setup code is invalid or expired.`
 `bootstrap.txt` is deleted only after the transaction commits.
 
+A setup code or registration token is consumed only while it is still unused: the
+transaction's first write marks it consumed on that condition, and a write that matches no
+row rolls the whole transaction back. Two registrations sent at once with the same code
+therefore create one owner. The other request waits for the first to commit, writes nothing,
+and gets the answer of any other invalid code: `Setup code is invalid or expired.`, or
+`Registration token is invalid or expired.` for a token.
+`POST /api/control-plane/auth/bootstrap/exchange` consumes the setup code on the same
+condition, so of two exchanges sent at once with one code, one gets a registration token and
+the other `Setup code is invalid or expired.`
+
 The web UI shows the codes on the second setup screen, requires an acknowledgement checkbox
 ("I saved my codes"), and never retrieves them again.
 
@@ -253,8 +263,10 @@ every field and the operator's profile.
   `Sec-Fetch-Site: same-origin` when the `Origin` does not match: a browser always sends `Origin`
   with a WebSocket handshake, so the relay takes nothing else.
 - Revocation: logout revokes the current session. Password _change_ revokes every other
-  session for the same user and keeps the initiating session alive. Password _reset_ via
-  recovery code revokes **all** sessions for the user.
+  session for the same user and keeps the initiating session alive; the new password and the
+  revocation are one database transaction, so if either write fails the password and the
+  sessions stay as they were. Password _reset_ via recovery code revokes **all** sessions for
+  the user.
 
 ### Plain HTTP
 
@@ -351,10 +363,17 @@ their stronger password checks.
   - the password hash is rotated
 
   These writes are one database transaction: if any of them fails, the password, the
-  codes and the sessions all stay as they were, and the same code still works.
+  codes and the sessions all stay as they were, and the same code still works. Its first
+  write marks the code consumed only while it is still unused, and a write that matches no
+  row rolls the transaction back, so of two resets sent at once with the same code, one
+  sets its password and the other changes nothing and fails with the generic
+  `Invalid identifier or recovery code.`
 - The owner must regenerate a fresh batch from `/settings/account` › Security (calling
   `POST /api/control-plane/auth/recovery-codes/regenerate`, which requires the current
-  password).
+  password). Marking the current codes consumed (`consumed_reason = "regenerated"`), storing
+  the new batch and moving `cp_operator_users.recovery_generation` to it are one database
+  transaction: if any of these writes fails, the current codes stay usable and no new code
+  is kept.
 
 This mirrors Google and GitHub's policy: a printed sheet of codes is useful once, but once
 one of them is compromised the whole sheet has to be rotated.
