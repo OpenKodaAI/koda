@@ -159,6 +159,10 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   password recovery takes at least 300 ms from when its body is read, with the same
   work whether the account exists, is locked or the secret is wrong. (M1-E1-T5,
   M1-E1-T13, D-135, D-136)
+- A failed MCP OAuth callback redirects only to the origin of
+  `MCP_OAUTH_CALLBACK_BASE_URL`, at `/oauth/callback` with the error code, and answers
+  JSON when that setting is empty. It no longer redirects to a `frontend_callback_uri`
+  taken from the query string or the session. (M1-E3-T6, D-030)
 
 
 ### Added

@@ -5046,16 +5046,22 @@ async def handle_oauth_callback_route(request: web.Request) -> web.Response:
         status = 200 if result.get("success") else 400
         return web.json_response(result, status=status)
 
-    frontend_target = str(
-        result.get("frontend_callback_uri") or request.query.get("frontend_callback_uri") or ""
-    ).strip()
-    if not frontend_target:
-        return web.json_response(result, status=200 if result.get("success") else 400)
     if result.get("success"):
+        frontend_target = str(result.get("frontend_callback_uri") or "").strip()
+        if not frontend_target:
+            return web.json_response(result, status=200)
         raise web.HTTPFound(
             f"{frontend_target}?status=success&server_key={result['server_key']}&agent_id={result['agent_id']}"
         )
-    raise web.HTTPFound(f"{frontend_target}?status=error&error={result.get('error', 'token_exchange_failed')}")
+    # A failure redirects only to the configured web origin; a query-supplied
+    # or stored frontend_callback_uri is never a redirect target here.
+    from koda.config import MCP_OAUTH_CALLBACK_BASE_URL
+
+    configured = urllib.parse.urlparse(MCP_OAUTH_CALLBACK_BASE_URL.strip())
+    if configured.scheme not in {"http", "https"} or not configured.netloc:
+        return web.json_response(result, status=400)
+    error_query = urllib.parse.urlencode({"status": "error", "error": result.get("error") or "token_exchange_failed"})
+    raise web.HTTPFound(f"{configured.scheme}://{configured.netloc}/oauth/callback?{error_query}")
 
 
 async def refresh_oauth_token_route(request: web.Request) -> web.Response:
