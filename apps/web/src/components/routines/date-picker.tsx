@@ -90,7 +90,7 @@ export function DatePicker({ value, onChange, disabled = false, className }: Dat
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[18rem] p-3">
-        {/* A div, not <header>: the popover portals outside <main>, where a
+        {/* A div, not <header>: the popover portals outside the main landmark, where a
             header is a second banner landmark (D-333). */}
         <div className="mb-2 flex items-center justify-between gap-2">
           <button

@@ -482,7 +482,7 @@ export function RoutineEditor({
             <X className="h-4 w-4" />
           </button>
 
-          {/* A div, not <header>: portaled outside <main>, a header is a second
+          {/* A div, not <header>: portaled outside the main landmark, a header is a second
               banner landmark next to the workspace topbar (D-333). */}
           <div className="shrink-0 px-7 pb-4 pt-7 pr-14">
             <h2
