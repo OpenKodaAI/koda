@@ -52,7 +52,7 @@ pnpm test:web
 pnpm build:web
 ```
 
-Full closeout still follows the repository validation gate in `AGENTS.md`.
+Full closeout still follows the repository validation gate in `CLAUDE.md`.
 
 ## Residual Risks
 

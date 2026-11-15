@@ -87,6 +87,6 @@ docker compose exec app python scripts/seed_demo_data.py --clear
 
 - Python backend: repository root.
 - Web dashboard: `apps/web/`.
-- Web design guide: `apps/web/CLAUDE.md` until `apps/web/AGENTS.md` exists.
+- Web design guide: `apps/web/CLAUDE.md`; `apps/web/AGENTS.md` points to it.
 - Public screenshots and diagrams: `docs/assets`.
 - Contributor guide: [CONTRIBUTING.md](../CONTRIBUTING.md).
