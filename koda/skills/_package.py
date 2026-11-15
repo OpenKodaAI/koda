@@ -40,7 +40,21 @@ _MAX_PACKAGE_FILES = 200
 _ALLOWED_PERMISSION_KEYS = frozenset({"filesystem", "network", "secrets", "shell", "mcp", "packages", "browser"})
 _HIGH_RISK_CLASSES = frozenset({"secret_access", "code_execution", "destructive_write", "unknown"})
 _REVIEW_RISK_CLASSES = frozenset({"network_write", "low_risk_write"})
-_DANGEROUS_IMPORTS = frozenset({"subprocess", "pexpect"})
+_DANGEROUS_IMPORTS = frozenset(
+    {
+        "subprocess",
+        "pexpect",
+        # The standard modules os.system and subprocess run a command through (D-323).
+        "posix",
+        "nt",
+        "_posixsubprocess",
+        "_winapi",
+    }
+)
+# Matched by the name as written and by every name an import in the file binds it to, so after
+# ``import os as o`` or ``from os import system as s``, ``o.system`` and ``s`` are ``os.system`` (D-323).
+_DANGEROUS_CALLS = frozenset({"eval", "exec", "os.system", "posix.system", "nt.system", "_winapi.CreateProcess"})
+_DANGEROUS_CALL_PREFIXES = ("subprocess.", "_posixsubprocess.")
 _NETWORK_IMPORTS = frozenset({"socket", "requests", "httpx", "urllib", "paramiko"})
 # Standard ways to run code that never reach SourceFileLoader.get_code, so never the verified bytes
 # package code runs from (D-292): a package that uses one needs an operator review (D-311).
@@ -1364,6 +1378,7 @@ def _scan_python_file(
     except SyntaxError as exc:
         findings.append(_finding("python.syntax", "error", "code", f"Python syntax error: {exc}", file_path))
         return
+    aliases = _import_aliases(tree)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -1373,8 +1388,22 @@ def _scan_python_file(
             root = str(node.module or "").split(".", 1)[0]
             _classify_import(root, findings, risk_classes, file_path)
         elif isinstance(node, ast.Call):
-            dotted = _call_name(node.func)
-            if dotted in {"eval", "exec", "os.system"} or dotted.startswith("subprocess."):
+            literal_module = _literal_import(node, aliases)[0]
+            if literal_module:
+                _classify_import(literal_module.split(".", 1)[0], findings, risk_classes, file_path)
+            names = {_call_name(node.func), *_imported_names(node.func, aliases)}
+            if isinstance(node.func, ast.Name):
+                # A star import binds the module's names: after ``from os import *``, ``system`` is ``os.system``.
+                names.update(f"{star[:-1]}{node.func.id}" for star in aliases.get("*", ()))
+            dotted = next(
+                (
+                    name
+                    for name in sorted(names)
+                    if name in _DANGEROUS_CALLS or name.startswith(_DANGEROUS_CALL_PREFIXES)
+                ),
+                "",
+            )
+            if dotted:
                 risk_classes.add("code_execution")
                 findings.append(
                     _finding(
@@ -1399,43 +1428,58 @@ def _scan_python_file(
         )
 
 
+def _import_aliases(tree: ast.AST) -> dict[str, set[str]]:
+    """The dotted names each name an import in *tree* binds can stand for (D-311, D-323).
+
+    Every binding is kept (``import os as o`` in one function and ``import json as o`` in another),
+    so a rebinding adds a match and never hides one. ``from m import *`` is kept under ``*`` as ``m.*``.
+    """
+    aliases: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    aliases.setdefault(alias.asname, set()).add(alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            for alias in node.names:
+                aliases.setdefault(alias.asname or alias.name, set()).add(f"{node.module}.{alias.name}")
+    return aliases
+
+
+def _literal_import(call: ast.Call, aliases: dict[str, set[str]]) -> tuple[str, str]:
+    """The module a literal ``__import__`` or ``importlib.import_module`` call imports, and the one it returns."""
+    first = call.args[0] if call.args else None
+    if not isinstance(first, ast.Constant) or not isinstance(first.value, str):
+        return "", ""
+    functions = {_call_name(call.func), *_imported_names(call.func, aliases)}
+    if "importlib.import_module" in functions:
+        return first.value, first.value
+    if "__import__" in functions:
+        return first.value, first.value.split(".", 1)[0]
+    return "", ""
+
+
+def _imported_names(node: ast.AST, aliases: dict[str, set[str]]) -> set[str]:
+    """The dotted names *node* can stand for, as written and through the file's imports (none when it names none)."""
+    if isinstance(node, ast.Name):
+        return {node.id, *aliases.get(node.id, ())}
+    if isinstance(node, ast.Attribute):
+        return {f"{owner}.{node.attr}" for owner in _imported_names(node.value, aliases)}
+    if isinstance(node, ast.Call):
+        returned = _literal_import(node, aliases)[1]
+        return {returned} if returned else set()
+    return set()
+
+
 def _exec_from_file_routes(tree: ast.AST) -> set[str]:
     """The names by which *tree* runs code past ``SourceFileLoader.get_code`` (D-311).
 
-    A name is matched as written and as the name an import in the file stands for (after
+    A name is matched as written and as every name an import in the file binds it to (after
     ``import os as o``, ``o.execv`` is ``os.execv``), so an alias adds a match and never hides one.
     """
     routes: set[str] = set()
-    aliases: dict[str, str] = {}
-    calls: dict[int, ast.Call] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            aliases.update((alias.asname, alias.name) for alias in node.names if alias.asname)
-        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
-            aliases.update((alias.asname or alias.name, f"{node.module}.{alias.name}") for alias in node.names)
-        elif isinstance(node, ast.Call):
-            calls[id(node.func)] = node
-
-    def literal_import(call: ast.Call) -> tuple[str, str]:
-        """The module a literal ``__import__`` or ``importlib.import_module`` call imports, and the one it returns."""
-        first = call.args[0] if call.args else None
-        if not isinstance(first, ast.Constant) or not isinstance(first.value, str):
-            return "", ""
-        functions = {_call_name(call.func), imported(call.func)}
-        if "importlib.import_module" in functions:
-            return first.value, first.value
-        if "__import__" in functions:
-            return first.value, first.value.split(".", 1)[0]
-        return "", ""
-
-    def imported(node: ast.AST) -> str:
-        """The dotted name *node* stands for through the file's imports, or "" when it does not name one."""
-        if isinstance(node, ast.Name):
-            return aliases.get(node.id, node.id)
-        if isinstance(node, ast.Attribute):
-            owner = imported(node.value)
-            return f"{owner}.{node.attr}" if owner else ""
-        return literal_import(node)[1] if isinstance(node, ast.Call) else ""
+    aliases = _import_aliases(tree)
+    calls = {id(node.func): node for node in ast.walk(tree) if isinstance(node, ast.Call)}
 
     def module(name: str) -> None:
         parts = name.split(".")
@@ -1479,7 +1523,7 @@ def _exec_from_file_routes(tree: ast.AST) -> set[str]:
             name = node.id if isinstance(node, ast.Name) else node.attr
             if name in _EXEC_FROM_FILE_NAMES:
                 routes.add(name)
-            dotted(_call_name(node), imported(node))
+            dotted(_call_name(node), *_imported_names(node, aliases))
             if (
                 isinstance(node, ast.Name)
                 and node.id == "compile"
@@ -1488,7 +1532,7 @@ def _exec_from_file_routes(tree: ast.AST) -> set[str]:
             ):
                 routes.add("compile")
         elif isinstance(node, ast.Call):
-            module(literal_import(node)[0])
+            module(_literal_import(node, aliases)[0])
         elif isinstance(node, ast.ClassDef):
             inherits = any(not (isinstance(base, ast.Name) and base.id == "object") for base in node.bases)
             routes.update(

@@ -176,13 +176,12 @@ _EXEC_FROM_FILE_CASES = [
         "types.FunctionType(c, {})()\n" + _STUB_HANDLER,
         "source_to_code",
     ),
-    # The call routes through an import alias, the posix module or a literal __import__.
+    # The call routes through an import alias or a literal __import__ (posix and _posixsubprocess are
+    # denied as imports, D-323).
     ("import builtins as b\nb.exec(open(__file__).read())\n" + _STUB_HANDLER, "builtins.exec"),
     ("from builtins import compile as c\n" + _STUB_HANDLER, "builtins.compile"),
     ("import os as o, sys\no.execv(sys.executable, [sys.executable, __file__])\n" + _STUB_HANDLER, "os.execv"),
-    ("import posix, sys\nposix.execv(sys.executable, [sys.executable, __file__])\n" + _STUB_HANDLER, "posix.execv"),
     ("import sys\n__import__('os').execv(sys.executable, [sys.executable])\n" + _STUB_HANDLER, "os.execv"),
-    ("import _posixsubprocess\n" + _STUB_HANDLER, "_posixsubprocess"),
     # The builtin compile passed on rather than called, and a loader subclass that replaces get_code.
     ("from functools import partial\nrun = partial(compile, mode='exec')\n" + _STUB_HANDLER, "compile"),
     (
@@ -212,6 +211,93 @@ def test_a_package_that_runs_code_from_a_file_outside_the_import_system_needs_re
     routes = [finding.message for finding in scan.findings if finding.id == "python.exec_from_file"]
     assert len(routes) == 1
     assert routes[0].endswith(f": {route}")
+
+
+_DANGEROUS_CALL = "python.dangerous_call"
+_DANGEROUS_IMPORT = "python.dangerous_import"
+# The direct forms first, then the same calls through an import alias, a rebinding, a star import, a
+# literal __import__ or a standard backend module (D-323).
+_DANGEROUS_CODE_CASES = [
+    ("import os\nos.system('id')\n", {(_DANGEROUS_CALL, "os.system")}),
+    (
+        "import subprocess\nsubprocess.run(['id'])\n",
+        {(_DANGEROUS_IMPORT, "subprocess"), (_DANGEROUS_CALL, "subprocess.run")},
+    ),
+    ("import os as o\no.system('id')\n", {(_DANGEROUS_CALL, "os.system")}),
+    ("from os import system as s\ns('id')\n", {(_DANGEROUS_CALL, "os.system")}),
+    ("from os import system\nsystem('id')\n", {(_DANGEROUS_CALL, "os.system")}),
+    ("from os import *\nsystem('id')\n", {(_DANGEROUS_CALL, "os.system")}),
+    ("__import__('os').system('id')\n", {(_DANGEROUS_CALL, "os.system")}),
+    (
+        "def f():\n    import os as o\n    o.system('id')\n\n\ndef g():\n    import json as o\n    return o\n",
+        {(_DANGEROUS_CALL, "os.system")},
+    ),
+    ("import posix\nposix.system('id')\n", {(_DANGEROUS_IMPORT, "posix"), (_DANGEROUS_CALL, "posix.system")}),
+    ("import nt\nnt.system('id')\n", {(_DANGEROUS_IMPORT, "nt"), (_DANGEROUS_CALL, "nt.system")}),
+    ("from posix import system as s\ns('id')\n", {(_DANGEROUS_IMPORT, "posix"), (_DANGEROUS_CALL, "posix.system")}),
+    ("import posix, sys\nposix.execv(sys.executable, [sys.executable])\n", {(_DANGEROUS_IMPORT, "posix")}),
+    ("import _posixsubprocess\n", {(_DANGEROUS_IMPORT, "_posixsubprocess")}),
+    (
+        "import _posixsubprocess as p\np.fork_exec()\n",
+        {(_DANGEROUS_IMPORT, "_posixsubprocess"), (_DANGEROUS_CALL, "_posixsubprocess.fork_exec")},
+    ),
+    (
+        "from _winapi import CreateProcess as c\nc()\n",
+        {(_DANGEROUS_IMPORT, "_winapi"), (_DANGEROUS_CALL, "_winapi.CreateProcess")},
+    ),
+    (
+        "import subprocess as sp\nsp.run(['id'])\n",
+        {(_DANGEROUS_IMPORT, "subprocess"), (_DANGEROUS_CALL, "subprocess.run")},
+    ),
+    (
+        "from subprocess import run as r\nr(['id'])\n",
+        {(_DANGEROUS_IMPORT, "subprocess"), (_DANGEROUS_CALL, "subprocess.run")},
+    ),
+    (
+        "m = __import__('subprocess')\nm.run(['id'])\n",
+        {(_DANGEROUS_IMPORT, "subprocess")},
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("handler_source", "expected"),
+    _DANGEROUS_CODE_CASES,
+    ids=[str(index) for index in range(len(_DANGEROUS_CODE_CASES))],
+)
+def test_a_dangerous_call_or_import_is_denied_through_an_alias_or_a_backend_module(
+    tmp_path: Path, handler_source: str, expected: set[tuple[str, str]]
+) -> None:
+    """D-323: an alias or a backend module of os.system or subprocess gets the direct form's finding and deny."""
+    package_dir = _write_safe_package(tmp_path)
+    (package_dir / "handlers.py").write_text(handler_source + _STUB_HANDLER, encoding="utf-8")
+
+    scan = scan_skill_package(package_dir, agent_id="ATLAS")
+
+    assert scan.decision == "deny"
+    dangerous = [finding for finding in scan.findings if finding.id in {_DANGEROUS_CALL, _DANGEROUS_IMPORT}]
+    assert {(finding.id, finding.message.rsplit(": ", 1)[-1]) for finding in dangerous} == expected
+    assert len(dangerous) == len(expected)
+    assert {finding.severity for finding in dangerous} == {"error"}
+
+
+def test_a_package_that_uses_os_only_for_paths_still_installs(tmp_path: Path) -> None:
+    """D-323: os.path through an import, an alias or a from-import, and a local system(), are not dangerous."""
+    package_dir = _write_safe_package(tmp_path)
+    (package_dir / "handlers.py").write_text(
+        "import os\nimport os.path as osp\nfrom os import path\nfrom os.path import join as j\n\n\n"
+        "def system(name):\n    return name\n\n\n"
+        "async def read_notes(params, ctx):\n"
+        "    from koda.services.tool_dispatcher import AgentToolResult\n\n"
+        "    notes = j(osp.dirname(__file__), path.basename(os.path.join('a', 'b')), system('c'))\n"
+        '    return AgentToolResult(tool="safe_notes", success=True, output=notes)\n',
+        encoding="utf-8",
+    )
+
+    result = install_skill_package(package_dir, agent_id="ATLAS")
+
+    assert result["lock"]["scan_summary"]["decision"] == "allow"
+    assert get_skill_package_lock("ATLAS", "safe_pack")["package_id"] == "safe_pack"
 
 
 _NOT_EXEC_FROM_FILE_CASES = [

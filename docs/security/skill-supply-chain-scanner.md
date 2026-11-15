@@ -28,7 +28,13 @@ The scanner denies:
 - secret-looking files or literal credentials
 - install scripts or lifecycle hooks
 - dangerous imports or calls such as `subprocess`, `eval`, `exec`, and
-  `os.system`
+  `os.system`, and the standard modules these run a command through
+  (`posix`, `nt`, `_posixsubprocess`, `_winapi`); a call is matched as written
+  and as every name an import in the same file binds it to (after
+  `import os as o`, `from os import system as s` or `from os import *`,
+  `o.system`, `s` and `system` are `os.system`; after `import subprocess as sp`,
+  `sp.run` is `subprocess.run`), and a literal module name passed to
+  `__import__` or `importlib.import_module` counts as an import (D-323)
 - unknown permissions
 - `secret_access`, `code_execution`, `destructive_write`, or `unknown` risk
   without an explicit review path
@@ -158,13 +164,14 @@ is left to the scanner, which flags these standard routes as
 - native code: `ctypes`, `_ctypes`;
 - another interpreter, which imports from disk without the guarantee:
   `multiprocessing`, `ProcessPoolExecutor`, `os.exec*`, `os.spawn*`,
-  `os.posix_spawn*`, `os.popen`, the same calls in `posix` (`posix.exec*`,
-  `posix.posix_spawn*`), `_posixsubprocess`, `pty.spawn`,
+  `os.posix_spawn*`, `os.popen`, `pty.spawn`,
   `asyncio.create_subprocess_*` and the event loop's `subprocess_exec` and
-  `subprocess_shell` (`subprocess` and `os.system` are denied).
+  `subprocess_shell` (`subprocess`, `os.system`, and `posix`, `nt`,
+  `_posixsubprocess` and `_winapi` imported at all, are denied).
 
-The scanner matches names as the code writes them and as the name an import in
-the same file stands for (after `import builtins as b`, `b.exec` is
+The scanner matches names as the code writes them and as every name an import
+in the same file binds them to, so a rebinding (`import json as o` in another
+function) adds a match and never hides one (after `import builtins as b`, `b.exec` is
 `builtins.exec`; after `import os as o`, `o.execv` is `os.execv`), including a
 literal module name passed to `importlib.import_module` or `__import__`
 (`__import__('os').execv` is `os.execv`); a name bound by an assignment or
