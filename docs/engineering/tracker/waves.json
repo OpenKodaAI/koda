@@ -52,9 +52,9 @@
   {
    "wave": "W6",
    "name": "Onda 6",
-   "scope": "Squads, memória e agendador, acessibilidade, estados de erro e navegação mobile (M3, M8). Estados de erro e navegação mobile aprovados; acessibilidade em rodada de pendências (foco escondido atrás da barra de comandos na Home). Onda 6b corrige a causa raiz do deadlock das squads (M3-E6-T1) e o despacho entre agentes do agendador (D-259)",
-   "status": "implementing",
-   "ref": "task/M3-*, task/M8-*"
+   "scope": "Squads (M3-E6-T1, T2, T3), memória e agendador (M3-E4-T6, D-259), acessibilidade (M8-E1-T1, T2, T3), estados de erro e navegação mobile. Estados de erro e navegação mobile mesclados; squads, memória e acessibilidade aprovados para o lote 5",
+   "status": "final_review",
+   "ref": "task/M3-E6-T2, task/M3-E4-T6, task/M8-E1-T1"
   },
   {
    "wave": "ADR",
@@ -82,28 +82,35 @@
    "name": "Onda 8",
    "scope": "Rotinas de ponta a ponta (M3-E1-T3, T6, T7, T8), rótulos honestos para o que ainda não funciona (M6-E1-T2, T9, T10, M6-E3-T5, T6), saúde e confiabilidade (M7-E1-T1, T2, T4, M7-E2-T4)",
    "status": "merged",
-   "ref": "6a1b874 (lote 2); rotinas no lote 4"
+   "ref": "6a1b874 (lote 2), 2e317f4 (lote 4)"
   },
   {
    "wave": "W9",
    "name": "Onda 9",
    "scope": "Segurança de ferramentas e pacotes (M1-E4-T2, T3, T5, T11, T12), IDs de agente e tabelas por agente (M2-E3-T1, T2, T4), código morto (M4-E1-T1, T2, T3, T8, T10, T14). Aprovadas e no lote 3: segurança de ferramentas e pacotes, código morto",
    "status": "merged",
-   "ref": "d19f6ac (lote 3); dados M2-E3 no lote 4"
+   "ref": "d19f6ac (lote 3), 2e317f4 (lote 4)"
   },
   {
    "wave": "W10",
    "name": "Onda 10",
-   "scope": "Infraestrutura de testes (M0-E2-T4, T5 e isolamento do diretório de estado), arquitetura (M5-E3-T8 um único redator)",
+   "scope": "Infraestrutura de testes (M0-E2-T4, T5, isolamento do diretório de estado, mesclados no lote 4), arquitetura (M5-E3-T8 um único redator, em terceira rodada: padrões em tempo linear) e guias de contribuição (M10-E1-T2, aprovado)",
    "status": "implementing",
-   "ref": "task/M0-E2-T4, task/M5-E3-T8"
+   "ref": "2e317f4 (lote 4), task/M5-E3-T8, task/M10-E1-T2"
   },
   {
    "wave": "W11",
    "name": "Onda 11",
-   "scope": "Segredos (M1-E6-T2, T3, T5), performance (M9-E1-T4, M9-E2-T1, T2), transações e gate de migrations (M2-E2-T1, T5)",
+   "scope": "Segredos e TLS (M1-E6-T2, T3, T5, mesclados no lote 4), performance (M9-E1-T4, M9-E2-T1, T2) e transações com gate de migrations (M2-E2-T1, T5), aprovados para o lote 5",
+   "status": "final_review",
+   "ref": "2e317f4 (lote 4), task/M9-E1-T4, task/M2-E2-T1"
+  },
+  {
+   "wave": "W12",
+   "name": "Onda 12",
+   "scope": "Segurança: limites do prompt MCP, cache de bytecode e carga atômica de plugins (D-269, D-273, D-270, aprovado); uso único de códigos de setup e recuperação (D-283, D-284, D-285); autorização de squads (M1-E5-T1, T4); OAuth, isolamento MCP e pareamento de canais (M1-E3-T6, M1-E4-T6, M1-E5-T3). Funcionalidades: provedores, /curl, gate de grounding e terminal (M6-E3-T2, T4, M6-E1-T5, T8)",
    "status": "implementing",
-   "ref": "task/M1-E6-T2, task/M9-E1-T4, task/M2-E2-T1"
+   "ref": "task/SEC-D269, task/SEC-D283, task/M1-E5-T1, task/M1-E3-T6, task/M6-E3-T2"
   }
  ],
  "meta": [

@@ -4,8 +4,8 @@
    "milestone": "M0",
    "name": "Base de testes e rede de segurança",
    "total": 25,
-   "done": 10,
-   "in_progress": 2,
+   "done": 12,
+   "in_progress": 0,
    "awaiting_evidence": 0,
    "remaining": 13
   },
@@ -13,17 +13,17 @@
    "milestone": "M1",
    "name": "Segurança",
    "total": 68,
-   "done": 26,
-   "in_progress": 3,
+   "done": 29,
+   "in_progress": 5,
    "awaiting_evidence": 3,
-   "remaining": 36
+   "remaining": 31
   },
   {
    "milestone": "M2",
    "name": "Integridade de dados",
    "total": 24,
-   "done": 2,
-   "in_progress": 5,
+   "done": 5,
+   "in_progress": 2,
    "awaiting_evidence": 0,
    "remaining": 17
   },
@@ -31,8 +31,8 @@
    "milestone": "M3",
    "name": "Jornadas críticas quebradas",
    "total": 43,
-   "done": 4,
-   "in_progress": 8,
+   "done": 8,
+   "in_progress": 4,
    "awaiting_evidence": 3,
    "remaining": 28
   },
@@ -59,9 +59,9 @@
    "name": "Completar funcionalidades",
    "total": 26,
    "done": 5,
-   "in_progress": 0,
+   "in_progress": 4,
    "awaiting_evidence": 0,
-   "remaining": 21
+   "remaining": 17
   },
   {
    "milestone": "M7",

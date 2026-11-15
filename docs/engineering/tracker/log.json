@@ -1,6 +1,16 @@
 {
  "rows": [
   {
+   "id": "L27",
+   "at": "2026-11-15 04:25",
+   "event": "Novas faixas: autorização de squads (M1-E5-T1/T4), redirecionamento OAuth, isolamento MCP e pareamento de canais (M1-E3-T6, M1-E4-T6, M1-E5-T3), uso único de códigos de setup e recuperação (D-283). O redator único volta para uma terceira rodada: a revisão achou backtracking catastrófico (ReDoS) e custo quadrático"
+  },
+  {
+   "id": "L26",
+   "at": "2026-11-15 04:25",
+   "event": "Lote 4 mesclado (2e317f4) com todos os gates verdes: 8596 testes Python, 316 Postgres, 1158 web, 102 Rust. Entraram: id de agente duplicado responde 409 e o servidor escolhe ids e portas; status pelo PATCH pausa e retoma de verdade; testes isolados (aprovação opt-in, diretório de estado por sessão); rotinas (arquivadas ocultas, nomes salvos, ações com retorno, cron validado no servidor, prévia no fuso da rotina); GRPC_TLS_ENABLED quebrado agora impede a partida com orientação; segredos sem prévia mascarada. Um contêiner reiniciado e um cache Rust compartilhado entre worktrees foram resolvidos sem perder trabalho"
+  },
+  {
    "id": "L25",
    "at": "2026-11-15 03:15",
    "event": "Lote 3 mesclado (d19f6ac) com gates verdes: 8540 testes Python, 303 Postgres, 1122 web. Entraram: saída de ferramentas tratada como dado não confiável, ferramentas desconhecidas como escrita, caminhos de plugin contidos, revisão de pacote só pelo operador e presa ao hash, pacote alterado recusado, cerca de 20 configurações mortas e endpoints legados removidos, 401 e tempo fixo de 300 ms no login e na recuperação de senha. Achado novo: o gate de política nega shell_execute e git_status sempre (D-278, ligado à aprovação de M3-E3-T1). Redator único em redesenho com corpus rotulado"
