@@ -1,6 +1,13 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Test and spec files and the Markdown guides are not sources: a probe class
+   that only a test or a guide spells would ship as a dead rule (D-351,
+   src/lib/tailwind-sources-contract.test.ts). */
+@source not "../**/*.{test,spec}.{ts,tsx}";
+@source not "../../tests";
+@source not "../../**/*.md";
+
 :root {
   --destructive-foreground: oklch(1 0 0);
   --canvas: #f9f7f3;
