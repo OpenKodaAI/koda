@@ -49,6 +49,90 @@ def squad_thread_turn_refusal(thread: Any) -> str | None:
     return None
 
 
+@dataclass(frozen=True)
+class SquadDelegationLimit:
+    """The limit that stops a delegation or an ``agent_send`` (D-095, D-096)."""
+
+    # "cycle", "depth" or "hop_count".
+    limit: str
+    maximum: int | None
+    reason: str
+
+
+def squad_delegation_limit(
+    *,
+    chain: list[str],
+    to_agent_id: str,
+    agent_send: bool = False,
+    delegation_depth: int = 0,
+) -> SquadDelegationLimit | None:
+    """The limit a message from the last agent of ``chain`` to ``to_agent_id`` reaches, or None.
+
+    ``chain`` is the path the message took, ending with its sender. A delegation stops when its
+    target is in the chain already (``cycle``), or when the chain, or the depth the sender
+    declared plus its own link, is longer than ``INTER_AGENT_MAX_DELEGATION_DEPTH`` (``depth``).
+    An ``agent_send`` stops when the chain is longer than ``MAX_REPLY_DEPTH`` hops
+    (``hop_count``), the bound ``squad_reply`` has, so two agents answering each other stop.
+    """
+    from koda import config
+    from koda.squads.replies import MAX_REPLY_DEPTH
+
+    if agent_send:
+        if len(chain) > MAX_REPLY_DEPTH:
+            return SquadDelegationLimit(
+                limit="hop_count",
+                maximum=MAX_REPLY_DEPTH,
+                reason=f"Max agent_send hop count ({MAX_REPLY_DEPTH}) exceeded.",
+            )
+        return None
+    if to_agent_id in chain:
+        return SquadDelegationLimit(
+            limit="cycle", maximum=None, reason=f"Delegation cycle detected for '{to_agent_id}'."
+        )
+    max_depth = int(config.INTER_AGENT_MAX_DELEGATION_DEPTH)
+    if max(len(chain), int(delegation_depth) + 1) > max_depth:
+        return SquadDelegationLimit(
+            limit="depth", maximum=max_depth, reason=f"Max delegation depth ({max_depth}) exceeded."
+        )
+    return None
+
+
+async def record_squad_delegation_limit(
+    thread_store: Any,
+    *,
+    thread_id: str,
+    limit: SquadDelegationLimit,
+    tool: str,
+    from_agent: str,
+    to_agent: str,
+    chain: list[str],
+    parent_message_id: str | None = None,
+) -> None:
+    """Post the one ``delegation_limit_reached`` system event that names the limit that stopped the work (P25)."""
+    metadata = {
+        "event_type": "delegation_limit_reached",
+        "limit": limit.limit,
+        "max": limit.maximum,
+        "reason": limit.reason,
+        "tool": tool,
+        "from_agent": from_agent,
+        "to_agent": to_agent,
+        "delegation_chain": list(chain),
+        "parent_message_id": parent_message_id,
+    }
+    try:
+        await thread_store.post_thread_message(
+            thread_id=thread_id,
+            from_agent="system",
+            content=f"[delegation_limit_reached] {from_agent} -> {to_agent}: {limit.reason}",
+            message_type="system_event",
+            metadata=metadata,
+        )
+        await thread_store.notify_event(thread_id=thread_id, event_type="delegation_limit_reached", data=metadata)
+    except Exception:
+        log.exception("squad_delegation_limit_event_failed", thread_id=thread_id, limit=limit.limit)
+
+
 class _SilentSquadDispatchMessage:
     def __init__(self, text: str = "") -> None:
         self.text = text

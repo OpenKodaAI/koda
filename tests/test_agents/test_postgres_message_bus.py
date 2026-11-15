@@ -249,6 +249,42 @@ async def test_persist_delegation_result_addresses_original_caller(monkeypatch: 
     assert args[:4] == ("worker", "caller", "done", "delegation_result")
 
 
+@pytest.mark.asyncio
+async def test_a_delegation_result_without_a_local_waiter_is_only_persisted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only an in-process delegator reads the in-memory result; any other is persisted, not kept (D-185)."""
+    from unittest.mock import AsyncMock
+
+    bus = PostgresMessageBus(dsn="postgresql://example.invalid/koda")
+    persist = AsyncMock()
+    monkeypatch.setattr(bus, "_persist_delegation_result", persist)
+
+    result = DelegationResult(request_id="req-1", from_agent="worker", to_agent="caller", success=True, result="x")
+    bus.resolve_delegation("req-1", result)
+    await asyncio.sleep(0)
+
+    assert bus._delegation_data == {}
+    persist.assert_awaited_once_with("req-1", result)
+
+
+@pytest.mark.asyncio
+async def test_a_delegation_request_persists_its_chain(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import AsyncMock
+
+    bus = PostgresMessageBus(dsn="postgresql://example.invalid/koda")
+    insert = AsyncMock(return_value="msg-1")
+    monkeypatch.setattr(bus, "_ensure_started", AsyncMock())
+    monkeypatch.setattr(bus, "_inbox_size", AsyncMock(return_value=0))
+    monkeypatch.setattr(bus, "_insert", insert)
+    monkeypatch.setattr(bus, "_fetch_delegation_result", AsyncMock(return_value=None))
+
+    await bus.delegate(
+        DelegationRequest(from_agent="a", to_agent="b", task="x", timeout=0.01, delegation_chain=["squad_router", "a"])
+    )
+
+    metadata = insert.await_args.args[4]
+    assert metadata["delegation_chain"] == ["squad_router", "a"]
+
+
 @pytest.mark.postgres
 @pytest.mark.asyncio
 async def test_broadcast_skips_sender_and_excluded(bus_factory) -> None:  # type: ignore[no-untyped-def]

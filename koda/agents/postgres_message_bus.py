@@ -478,6 +478,7 @@ class PostgresMessageBus:
                 "request_id": request.request_id,
                 "context": request.context,
                 "delegation_depth": request.delegation_depth,
+                "delegation_chain": list(request.delegation_chain),
                 "thread_id": request.thread_id,
                 "squad_task_id": request.squad_task_id,
                 "parent_message_id": request.parent_message_id,
@@ -526,9 +527,11 @@ class PostgresMessageBus:
             self._delegation_results.pop(request.request_id, None)
 
     def resolve_delegation(self, request_id: str, result: DelegationResult) -> None:
-        self._delegation_data[request_id] = result
+        # The result is kept in memory only for a delegator waiting in this process; any other
+        # reads the persisted row, so nothing is kept that no one pops (D-185).
         event = self._delegation_results.get(request_id)
         if event is not None:
+            self._delegation_data[request_id] = result
             event.set()
         try:
             loop = asyncio.get_running_loop()

@@ -3612,6 +3612,32 @@ async def _require_squad_admin(
     return None
 
 
+async def _squad_delegation_limit_refusal(
+    tool: str, ctx: ToolContext, chain: list[str], to: str
+) -> AgentToolResult | None:
+    """Refuse a delegation or ``agent_send`` past a limit; in a squad thread, the room is told which (P25)."""
+    from koda.squads import get_squad_thread_store, record_squad_delegation_limit, squad_delegation_limit
+
+    limit = squad_delegation_limit(chain=chain, to_agent_id=to, agent_send=tool == "agent_send")
+    if limit is None:
+        return None
+    log.info("inter_agent_limit_reached", tool=tool, limit=limit.limit, chain=chain, to_agent=to)
+    thread_store = get_squad_thread_store() if ctx.squad_thread_id else None
+    if ctx.squad_thread_id and thread_store is not None:
+        await record_squad_delegation_limit(
+            thread_store,
+            thread_id=ctx.squad_thread_id,
+            limit=limit,
+            tool=tool,
+            from_agent=chain[-1],
+            to_agent=to,
+            chain=chain,
+            parent_message_id=ctx.parent_message_id,
+        )
+    output = f"Delegation failed: {limit.reason}" if limit.limit == "depth" else limit.reason
+    return AgentToolResult(tool=tool, success=False, output=output)
+
+
 async def _handle_agent_send(params: dict, ctx: ToolContext) -> AgentToolResult:
     err = await _check_inter_agent_available("agent_send")
     if err:
@@ -3642,6 +3668,11 @@ async def _handle_agent_send(params: dict, ctx: ToolContext) -> AgentToolResult:
     from koda.agents import get_message_bus
 
     from_agent = _ctx_agent_id(ctx)
+    # The message carries every hop that led to it, so a squad thread's agents cannot answer each
+    # other without end (D-096).
+    chain = [*(ctx.delegation_chain or []), from_agent]
+    if ctx.squad_thread_id and (refused := await _squad_delegation_limit_refusal("agent_send", ctx, chain, to)):
+        return refused
     log.info("inter_agent_communication", tool="agent_send", from_agent=from_agent, to_agent=to, user_id=ctx.user_id)
     _audit_blocked("agent_send", f"inter_agent:{from_agent}->{to}", user_id=ctx.user_id)
     msg_id = await get_message_bus().send(
@@ -3652,7 +3683,7 @@ async def _handle_agent_send(params: dict, ctx: ToolContext) -> AgentToolResult:
             "thread_id": ctx.squad_thread_id,
             "squad_task_id": ctx.squad_task_id,
             "parent_message_id": ctx.parent_message_id,
-            "delegation_chain": ctx.delegation_chain,
+            "delegation_chain": chain,
             "kind": "agent_text",
         },
     )
@@ -3694,8 +3725,6 @@ async def _handle_agent_delegate(params: dict, ctx: ToolContext) -> AgentToolRes
     task = params.get("task", "")
     if not to or not task:
         return AgentToolResult(tool="agent_delegate", success=False, output="Missing 'to' and 'task'.")
-    if to in set(ctx.delegation_chain or []):
-        return AgentToolResult(tool="agent_delegate", success=False, output=f"Delegation cycle detected for '{to}'.")
     if ctx.squad_thread_id:
         access_err = await _require_squad_thread_access(
             tool="agent_delegate",
@@ -3714,13 +3743,17 @@ async def _handle_agent_delegate(params: dict, ctx: ToolContext) -> AgentToolRes
             await service.require_thread_access(thread_id=ctx.squad_thread_id, agent_id=to)
         except SquadAccessError as exc:
             return AgentToolResult(tool="agent_delegate", success=False, output=f"Forbidden target: {exc}")
+    from_agent = _ctx_agent_id(ctx)
+    # The request carries the whole chain, so a cycle or the depth cap is seen at every hop (D-095).
+    chain = [*(ctx.delegation_chain or []), from_agent]
+    if refused := await _squad_delegation_limit_refusal("agent_delegate", ctx, chain, to):
+        return refused
     timeout = min(int(params.get("timeout", 60)), 300)
     context = params.get("context", {})
 
     from koda.agents import get_message_bus
     from koda.agents.models import DelegationRequest
 
-    from_agent = _ctx_agent_id(ctx)
     log.info(
         "inter_agent_communication",
         tool="agent_delegate",
@@ -3736,6 +3769,7 @@ async def _handle_agent_delegate(params: dict, ctx: ToolContext) -> AgentToolRes
         context=context if isinstance(context, dict) else {},
         timeout=timeout,
         delegation_depth=len(ctx.delegation_chain or []),
+        delegation_chain=chain,
         thread_id=ctx.squad_thread_id,
         parent_message_id=ctx.parent_message_id,
         squad_task_id=ctx.squad_task_id,

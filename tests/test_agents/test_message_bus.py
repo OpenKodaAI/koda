@@ -139,6 +139,30 @@ async def test_delegation_success(bus: InMemoryMessageBus) -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_delegation_result_nobody_waits_for_is_not_kept(bus: InMemoryMessageBus) -> None:
+    """A result that arrives after its delegator stopped waiting is dropped, not kept forever (D-185)."""
+    req = DelegationRequest(from_agent="a1", to_agent="a2", task="slow", timeout=0.05)
+    timed_out = await bus.delegate(req)
+    assert not timed_out.success
+    bus.resolve_delegation(
+        req.request_id,
+        DelegationResult(request_id=req.request_id, from_agent="a2", to_agent="a1", success=True, result="late"),
+    )
+    assert bus._delegation_data == {}
+
+
+@pytest.mark.asyncio
+async def test_a_delegation_request_carries_its_chain(bus: InMemoryMessageBus) -> None:
+    req = DelegationRequest(
+        from_agent="a1", to_agent="a2", task="x", timeout=0.05, delegation_chain=["squad_router", "a1"]
+    )
+    await bus.delegate(req)
+    msg = await bus.receive("a2", timeout=1)
+    assert msg is not None
+    assert msg.metadata["delegation_chain"] == ["squad_router", "a1"]
+
+
+@pytest.mark.asyncio
 async def test_delegation_depth_limit(bus: InMemoryMessageBus, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("koda.config.INTER_AGENT_MAX_DELEGATION_DEPTH", 2)
     req = DelegationRequest(from_agent="a1", to_agent="a2", task="chain", delegation_depth=2)

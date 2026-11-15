@@ -2598,6 +2598,54 @@ async def _squad_thread_runtime_defaults(thread_id: str) -> tuple[int, int]:
         return 0, 0
 
 
+async def _refuse_squad_inbox_message_past_limit(
+    bus: Any,
+    *,
+    agent_id: str,
+    msg: Any,
+    thread_id: str,
+    chain: list[str],
+    limit: Any,
+    request_id: str | None,
+) -> None:
+    """Tell the room which limit stopped a delegation or agent_send, and a delegator that it failed (P25)."""
+    from koda.agents.models import DelegationResult
+    from koda.squads import get_squad_thread_store, record_squad_delegation_limit
+
+    log.info(
+        "squad_inbox_message_past_limit",
+        agent_id=agent_id,
+        message_id=msg.message_id,
+        thread_id=thread_id,
+        limit=limit.limit,
+        chain=chain,
+    )
+    thread_store = get_squad_thread_store()
+    if thread_store is not None:
+        await record_squad_delegation_limit(
+            thread_store,
+            thread_id=thread_id,
+            limit=limit,
+            tool="agent_delegate" if msg.message_type == "delegation_request" else "agent_send",
+            from_agent=str(msg.from_agent or ""),
+            to_agent=agent_id,
+            chain=chain,
+            parent_message_id=(msg.metadata or {}).get("parent_message_id"),
+        )
+    if request_id:
+        # The delegator waits for a result: it gets the refusal now instead of its timeout.
+        bus.resolve_delegation(
+            request_id,
+            DelegationResult(
+                request_id=request_id,
+                from_agent=agent_id,
+                to_agent=str(msg.from_agent or ""),
+                success=False,
+                error=limit.reason,
+            ),
+        )
+
+
 async def start_squad_inbox_dispatcher(application: Any) -> None:
     """Consume durable squad inbox messages and enqueue real agent turns.
 
@@ -2606,7 +2654,7 @@ async def start_squad_inbox_dispatcher(application: Any) -> None:
     """
     from koda.agents import get_message_bus
     from koda.config import SQUAD_POLL_INTERVAL_S, SQUADS_ENABLED
-    from koda.squads import SquadThreadNotRunnableError
+    from koda.squads import SquadThreadNotRunnableError, squad_delegation_limit
 
     agent_id = AGENT_ID or "default"
     if not SQUADS_ENABLED:
@@ -2660,6 +2708,29 @@ async def start_squad_inbox_dispatcher(application: Any) -> None:
                 if msg.from_agent and msg.from_agent not in chain:
                     chain.append(msg.from_agent)
                 request_id = metadata.get("request_id") if kind in {"task_request", "delegation_request"} else None
+                # A delegation past a cycle or the depth cap, or an agent_send past the hop limit,
+                # runs no turn, whichever runtime sent it (D-095, D-096).
+                limit = None
+                if msg.message_type == "delegation_request":
+                    limit = squad_delegation_limit(
+                        chain=chain,
+                        to_agent_id=agent_id,
+                        delegation_depth=_coerce_int_or_zero(metadata.get("delegation_depth")),
+                    )
+                elif kind == "agent_text":
+                    limit = squad_delegation_limit(chain=chain, to_agent_id=agent_id, agent_send=True)
+                if limit is not None:
+                    await bus.ack(agent_id, msg.message_id)
+                    await _refuse_squad_inbox_message_past_limit(
+                        bus,
+                        agent_id=agent_id,
+                        msg=msg,
+                        thread_id=str(thread_id),
+                        chain=chain,
+                        limit=limit,
+                        request_id=str(request_id) if request_id else None,
+                    )
+                    continue
 
                 enqueued_task_id = await enqueue_squad_agent_task(
                     application=application,

@@ -111,6 +111,16 @@ Before broad rollout, run these in canary:
   `metadata`; keys the server keeps, such as the budget flags, are refused.
 - Pause a room from the dashboard; the room must show a `thread_paused`
   system event with reason `operator`.
+- Have agents delegate A to B to C and back to A, delegate past
+  `INTER_AGENT_MAX_DELEGATION_DEPTH`, and answer each other with `agent_send`
+  past 6 hops (`MAX_REPLY_DEPTH`, the bound `squad_reply` has). Each delegation
+  request and `agent_send` message carries the whole chain of agents that led
+  to it, ending with its sender, and every entry counts, the router's included.
+  The sender's tool refuses the cycle, the depth or the hop count, and the
+  receiving inbox refuses the same before it queues a turn, whichever runtime
+  sent it; a delegator the inbox refuses gets the failure at once. Each refusal
+  must show one `delegation_limit_reached` system event whose `limit` is
+  `cycle`, `depth` or `hop_count`.
 - Disable a Telegram bot admin permission; bind/strict checks must fail closed.
 
 ## Rollback
