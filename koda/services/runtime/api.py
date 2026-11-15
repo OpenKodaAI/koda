@@ -8,7 +8,7 @@ import json
 import mimetypes
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import quote
 from uuid import UUID, uuid4
 
 from aiohttp import WSMsgType, web
@@ -248,41 +248,51 @@ def _latest_browser_preview_path(task_id: int) -> Path | None:
     return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
-_PATH_KEY_SUFFIXES = ("_path", "_dir", "_file", "_root")
+# The browser payload is built from these names only, so free-form kernel or session ``metadata``
+# and any key the kernel adds later never reach a browser (M3-E8-T4). They are the browser state
+# fields the dashboard types (``RuntimeBrowserState`` in apps/web) other than the process ids and
+# ``novnc_url``, and the text diagnostics, which pass unchanged; ``runtime_dir`` is added relative
+# to the task's runtime directory.
+_BROWSER_FIELDS = (
+    "scope_id",
+    "transport",
+    "status",
+    "last_known_status",
+    "display_id",
+    "vnc_port",
+    "novnc_port",
+    "missing_binaries",
+    "visual_available",
+    "session_persisted_only",
+    "unavailable_reason",
+    "kernel_error",
+    "last_title",
+)
+# The typed columns of a browser session row; its ``metadata`` is not forwarded.
+_BROWSER_SESSION_FIELDS = (
+    "id",
+    "task_id",
+    "env_id",
+    "scope_id",
+    "transport",
+    "status",
+    "display_id",
+    "vnc_port",
+    "novnc_port",
+    "created_at",
+    "updated_at",
+    "ended_at",
+)
 
 
-def _is_path_key(key: str) -> bool:
-    """True for a key that holds a filesystem path: ``path``, ``dir``, ``*_path``, ``*_dir``, ``*_file``, ``*_root``.
-
-    A plural (``download_paths``) holds a list of them.
-    """
-    name = key.lower().removesuffix("s")
-    return name in {"path", "dir"} or name.endswith(_PATH_KEY_SUFFIXES)
-
-
-def _task_relative_path(path: Path, task_root: Path) -> str | None:
+def _task_relative_path(path: object, task_root: Path) -> str | None:
+    """``path`` relative to the task's runtime directory, or None when it is empty or outside it."""
+    if not path:
+        return None
     try:
-        return path.resolve().relative_to(task_root.resolve()).as_posix()
+        return Path(str(path)).resolve().relative_to(task_root.resolve()).as_posix()
     except ValueError:
         return None
-
-
-def _task_relative_paths(value: object, task_root: Path, key: str = "") -> object:
-    """Rewrite host paths relative to the task's runtime directory; a path outside it becomes ``None``.
-
-    A host path is an absolute path under a path key (see ``_is_path_key``) or a ``file:`` URL under
-    any key. Other text, such as a page title or an error that starts with ``/``, is kept as it is.
-    """
-    if isinstance(value, dict):
-        return {item_key: _task_relative_paths(item, task_root, str(item_key)) for item_key, item in value.items()}
-    if isinstance(value, list):
-        return [_task_relative_paths(item, task_root, key) for item in value]
-    if isinstance(value, str):
-        if value[:5].lower() == "file:":
-            return _task_relative_path(Path(unquote(urlparse(value).path)), task_root)
-        if _is_path_key(key) and Path(value).is_absolute():
-            return _task_relative_path(Path(value), task_root)
-    return value
 
 
 def _task_runtime_root(task_id: int) -> Path:
@@ -292,16 +302,23 @@ def _task_runtime_root(task_id: int) -> Path:
 def _browser_payload(task_id: int) -> dict[str, object]:
     controller = get_runtime_controller()
     task_root = _task_runtime_root(task_id)
-    browser = cast(dict[str, object], _task_relative_paths(dict(controller.get_browser_snapshot(task_id)), task_root))
+    snapshot = controller.get_browser_snapshot(task_id)
+    browser: dict[str, object] = {key: snapshot[key] for key in _BROWSER_FIELDS if key in snapshot}
+    if "runtime_dir" in snapshot:
+        browser["runtime_dir"] = _task_relative_path(snapshot["runtime_dir"], task_root)
     preview_path = _latest_browser_preview_path(task_id)
     browser["screenshot_url"] = f"/api/runtime/tasks/{task_id}/browser/screenshot"
     browser["preview_url"] = str(browser["screenshot_url"])
     browser["preview_available"] = preview_path is not None or (
-        bool(browser) and not bool(browser.get("session_persisted_only"))
+        bool(snapshot) and not bool(snapshot.get("session_persisted_only"))
     )
     if preview_path is not None:
         browser["preview_path"] = _task_relative_path(preview_path, task_root)
     return browser
+
+
+def _browser_session_rows(sessions: list[dict[str, Any]]) -> list[dict[str, object]]:
+    return [{key: row[key] for key in _BROWSER_SESSION_FIELDS if key in row} for row in sessions]
 
 
 async def _runtime_queues(request: web.Request) -> web.Response:
@@ -842,6 +859,12 @@ async def _runtime_task_detail(request: web.Request) -> web.Response:
     from koda.knowledge.presentation import redact_runtime_knowledge_payload
 
     environment = controller.store.get_environment_by_task(task_id)
+    environment_payload = dict(environment) if environment else environment
+    if environment_payload and "runtime_dir" in environment_payload:
+        # The dashboard gets the task-relative directory, never the host path (M3-E8-T4).
+        environment_payload["runtime_dir"] = _task_relative_path(
+            environment_payload["runtime_dir"], _task_runtime_root(task_id)
+        )
     list_events = getattr(controller.store, "list_events", None)
     runtime_events = list_events(task_id=task_id, after_seq=0) if callable(list_events) else []
     run_graph_payload: dict[str, object] | None = None
@@ -914,7 +937,7 @@ async def _runtime_task_detail(request: web.Request) -> web.Response:
     return web.json_response(
         {
             "task": task,
-            "environment": environment,
+            "environment": environment_payload,
             "runtime_kernel": runtime_kernel_snapshot,
             "warnings": controller.store.list_warnings(task_id),
             "guardrails": controller.list_guardrail_hits(task_id),
@@ -1097,11 +1120,10 @@ async def _runtime_task_browser(request: web.Request) -> web.Response:
         return auth
     task_id = int(request.match_info["task_id"])
     controller = get_runtime_controller()
-    sessions = controller.store.list_browser_sessions(task_id)
     return web.json_response(
         {
             "browser": _browser_payload(task_id),
-            "sessions": _task_relative_paths(sessions, _task_runtime_root(task_id)),
+            "sessions": _browser_session_rows(controller.store.list_browser_sessions(task_id)),
         }
     )
 
@@ -1351,7 +1373,9 @@ async def _runtime_task_sessions(request: web.Request) -> web.Response:
     if auth:
         return auth
     task_id = int(request.match_info["task_id"])
-    return web.json_response(get_runtime_controller().list_sessions(task_id))
+    sessions = dict(get_runtime_controller().list_sessions(task_id))
+    sessions["browser_sessions"] = _browser_session_rows(sessions.get("browser_sessions") or [])
+    return web.json_response(sessions)
 
 
 async def _runtime_stream_sse(request: web.Request) -> web.StreamResponse:

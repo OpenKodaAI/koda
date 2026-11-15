@@ -57,7 +57,7 @@ describe("RuntimeTaskRoom", () => {
     const { useRuntimeTask } = await import("@/hooks/use-runtime-task");
     const refresh = vi.fn(async () => undefined);
     const mutate = vi.fn(async () => ({}));
-    vi.mocked(useRuntimeTask).mockReturnValue({
+    const runtimeTask = {
       bundle: {
         agentId: "ATLAS",
         fetchedAt: "2026-03-19T00:00:00.000Z",
@@ -86,7 +86,8 @@ describe("RuntimeTaskRoom", () => {
           source_root_path: "/missing/source",
           source_root_exists: false,
           workspace_path: "/tmp/runtime-42",
-          runtime_dir: "/tmp/runtime-42/.runtime",
+          // The runtime sends the directory relative to the task's runtime directory (M3-E8-T4).
+          runtime_dir: ".",
           last_heartbeat_at: "2026-03-19T00:01:00.000Z",
         },
         warnings: [],
@@ -139,17 +140,19 @@ describe("RuntimeTaskRoom", () => {
       refresh,
       mutate,
       fetchResource: vi.fn(),
-    });
+    };
+    vi.mocked(useRuntimeTask).mockReturnValue(runtimeTask);
 
     const { RuntimeTaskRoom } = await import("@/components/runtime/runtime-task-room");
 
-    render(
+    const room = () => (
       <I18nProvider initialLanguage="pt-BR">
         <ToastProvider>
           <RuntimeTaskRoom agentId="ATLAS" taskId={42} />
         </ToastProvider>
-      </I18nProvider>,
+      </I18nProvider>
     );
+    const { rerender } = render(room());
 
     expect(screen.getByText("Tarefa #42")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Terminal" })).toBeInTheDocument();
@@ -213,6 +216,20 @@ describe("RuntimeTaskRoom", () => {
     expect(statusLine.closest("pre")).toHaveClass("runtime-git-syntax");
     expect(statusLine).toHaveClass("syn-git-status-modified");
     expect(screen.getByText("+ novo fluxo")).toHaveClass("syn-diff-add");
+
+    // The runtime directory shows what the runtime sends: a task-relative path, or "—" for null.
+    const runtimeDirBlock = () =>
+      screen.getByRole("heading", { name: "Diretório do runtime" }).closest("section");
+    expect(runtimeDirBlock()).toHaveTextContent(/^Diretório do runtime\.$/);
+    vi.mocked(useRuntimeTask).mockReturnValue({
+      ...runtimeTask,
+      bundle: {
+        ...runtimeTask.bundle,
+        environment: { ...runtimeTask.bundle.environment, runtime_dir: null },
+      },
+    });
+    rerender(room());
+    expect(runtimeDirBlock()).toHaveTextContent(/^Diretório do runtime—$/);
   });
 
 });

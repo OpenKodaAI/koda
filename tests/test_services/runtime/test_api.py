@@ -351,30 +351,15 @@ async def test_runtime_task_browser_exposes_preview_url(tmp_path):
     assert payload["browser"]["preview_path"] == "artifacts/preview.png"
 
 
-# Free-text fields whose text may start with "/" without naming a host path.
-_TEXT_KEYS = {"last_title", "kernel_error", "unavailable_reason"}
-
-
-def _absolute_paths(value: object, key: str = "") -> list[str]:
-    if isinstance(value, dict):
-        return [path for item_key, item in value.items() for path in _absolute_paths(item, str(item_key))]
-    if isinstance(value, list):
-        return [path for item in value for path in _absolute_paths(item, key)]
-    is_text = key in _TEXT_KEYS or key.endswith("_url")
-    if isinstance(value, str) and not is_text and value.startswith(("/", "file:")):
-        return [f"{key}={value}"]
-    return []
-
-
 @pytest.mark.asyncio
-async def test_runtime_task_browser_payload_has_no_absolute_host_paths(tmp_path):
+async def test_runtime_task_browser_payload_is_an_explicit_projection(tmp_path):
+    """Only the named browser fields are sent; other snapshot keys and session metadata are not (M3-E8-T4)."""
     runtime_root = tmp_path / "runtime"
     task_root = runtime_root / "tasks" / "7"
     screenshot = task_root / "browser" / "browser_7_1.png"
     screenshot.parent.mkdir(parents=True, exist_ok=True)
     screenshot.write_bytes(b"\x89PNG\r\n")
     outside = tmp_path / "elsewhere" / "shot.png"
-    page = task_root / "browser" / "page.html"
     controller = _ControllerStub(
         runtime_root=runtime_root,
         env={"task_id": 7, "browser_scope_id": 7},
@@ -386,18 +371,14 @@ async def test_runtime_task_browser_payload_has_no_absolute_host_paths(tmp_path)
             "metadata": {"runtime_dir": str(task_root / "browser"), "profile_dir": str(outside.parent)},
             "download_paths": [str(outside)],
             "url": outside.as_uri(),
-            "origin": outside.as_uri(),
-            "last_url": page.as_uri(),
             "last_title": "/",
             "kernel_error": "/usr/bin/Xvfb: not found",
             "unavailable_reason": "/dev/shm is full",
             "session_persisted_only": True,
         },
     )
-    kernel_runtime_dir = tmp_path / "kernel" / "tasks" / "7" / "browser"
     controller.store.list_browser_sessions = lambda task_id: [  # type: ignore[method-assign]
         {"id": 1, "status": "running", "metadata": {"runtime_dir": str(task_root / "browser")}},
-        {"id": 2, "status": "running", "metadata": {"runtime_dir": str(kernel_runtime_dir), "scope_id": 7}},
     ]
     request = _request(task_id=7, headers={"X-Runtime-Token": "secret"})
 
@@ -407,22 +388,22 @@ async def test_runtime_task_browser_payload_has_no_absolute_host_paths(tmp_path)
     ):
         response = await _runtime_task_browser(request)
 
+    assert str(tmp_path) not in response.text
     body = json.loads(response.text)
-    assert _absolute_paths(body) == []
-    browser = body["browser"]
-    assert browser["runtime_dir"] == "browser"
-    assert browser["last_screenshot_path"] == "browser/browser_7_1.png"
-    assert browser["preview_path"] == "browser/browser_7_1.png"
-    assert browser["metadata"] == {"runtime_dir": "browser", "profile_dir": None}
-    assert browser["download_paths"] == [None]
-    assert (browser["url"], browser["origin"], browser["last_url"]) == (None, None, "browser/page.html")
-    assert browser["last_title"] == "/"
-    assert browser["kernel_error"] == "/usr/bin/Xvfb: not found"
-    assert browser["unavailable_reason"] == "/dev/shm is full"
-    assert body["sessions"] == [
-        {"id": 1, "status": "running", "metadata": {"runtime_dir": "browser"}},
-        {"id": 2, "status": "running", "metadata": {"runtime_dir": None, "scope_id": 7}},
-    ]
+    assert body["browser"] == {
+        "scope_id": 7,
+        "status": "unavailable",
+        "runtime_dir": "browser",
+        "last_title": "/",
+        "kernel_error": "/usr/bin/Xvfb: not found",
+        "unavailable_reason": "/dev/shm is full",
+        "session_persisted_only": True,
+        "screenshot_url": "/api/runtime/tasks/7/browser/screenshot",
+        "preview_url": "/api/runtime/tasks/7/browser/screenshot",
+        "preview_available": True,
+        "preview_path": "browser/browser_7_1.png",
+    }
+    assert body["sessions"] == [{"id": 1, "status": "running"}]
 
 
 @pytest.mark.asyncio
@@ -660,6 +641,42 @@ async def test_runtime_task_detail_skips_legacy_local_knowledge_in_postgres_prim
     assert response.status == 200
     assert payload["knowledge"]["retrieval_trace"]["id"] == 91
     assert payload["knowledge"]["answer_trace"]["id"] == 44
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("runtime_dir", "expected"),
+    [
+        pytest.param("runtime/tasks/12", ".", id="task-root"),
+        pytest.param("runtime/tasks/12/browser", "browser", id="inside"),
+        pytest.param("kernel/tasks/12", None, id="outside"),
+    ],
+)
+async def test_runtime_task_detail_environment_runtime_dir_is_task_relative(tmp_path, runtime_dir, expected):
+    """The environment's runtime_dir is relative to the task's runtime directory, or null (M3-E8-T4)."""
+    env = {"id": 3, "task_id": 12, "runtime_dir": str(tmp_path / runtime_dir), "workspace_path": "/work/repo"}
+    controller = _ControllerStub(runtime_root=tmp_path / "runtime", env=env)
+    request = _request(task_id=12, headers={"X-Runtime-Token": "secret"})
+
+    with (
+        patch("koda.services.runtime.api.get_runtime_controller", return_value=controller),
+        patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "secret"),
+        patch("koda.state.knowledge_governance_store.get_latest_execution_episode", return_value=None),
+        _patch_knowledge_modules(
+            repository_cls=MagicMock(),
+            storage_cls=MagicMock(return_value=_KnowledgeStorageStub()),
+        ),
+        _patch_agent_asset_registry(SimpleNamespace(search=AsyncMock(return_value=[]))),
+    ):
+        response = await _runtime_task_detail(request)
+
+    assert response.status == 200
+    assert str(tmp_path) not in response.text
+    environment = json.loads(response.text)["environment"]
+    assert environment["runtime_dir"] == expected
+    assert environment["workspace_path"] == "/work/repo"
+    # The store's row is not changed.
+    assert env["runtime_dir"] == str(tmp_path / runtime_dir)
 
 
 @pytest.mark.asyncio
