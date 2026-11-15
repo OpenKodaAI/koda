@@ -4464,6 +4464,21 @@ async def _run_status_update(
     target_status = new_status or params.get("new_status", "")
     if not task_id or not target_status:
         return AgentToolResult(tool=tool_name, success=False, output="Missing 'task_id' or 'new_status'.")
+    metadata_patch = params.get("metadata_patch")
+    if isinstance(metadata_patch, dict):
+        from koda.squads.tasks import AGENT_TASK_METADATA_KEYS
+
+        # The claim bookkeeping and the coordination fields are the server's (D-339).
+        server_keys = sorted(str(key) for key in metadata_patch if str(key) not in AGENT_TASK_METADATA_KEYS)
+        if server_keys:
+            return AgentToolResult(
+                tool=tool_name,
+                success=False,
+                output=(
+                    f"Task metadata cannot be set by an agent: {', '.join(server_keys)}. "
+                    f"metadata_patch may set only: {', '.join(sorted(AGENT_TASK_METADATA_KEYS))}."
+                ),
+            )
     coordinator_override = bool(params.get("coordinator_override", False))
     access_err = await _require_squad_task_access(
         tool=tool_name,
@@ -4490,7 +4505,6 @@ async def _run_status_update(
 
     extra = extra or {}
     expected_version = params.get("expected_version")
-    metadata_patch = params.get("metadata_patch")
     try:
         task = await store.update_task_status(
             task_id=task_id,

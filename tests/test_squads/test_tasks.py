@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import suppress
+from typing import Any
 
 import pytest
 
@@ -388,3 +389,129 @@ async def test_a_new_claim_of_a_task_whose_earlier_claim_was_refused_is_renewed_
     assert expired.task_id == task.id
     assert expired.refused is False
     assert expired.expiry_count == 1
+
+
+@pytest.fixture
+def task_tool(
+    stores: tuple[SquadThreadStore, SquadTaskStore], monkeypatch: pytest.MonkeyPatch
+) -> Iterator[Callable[..., Awaitable[Any]]]:
+    """``squad_task_update`` as agent FE calls it, against the real task store."""
+    from unittest.mock import AsyncMock, Mock, patch
+
+    from koda.services.tool_dispatcher import ToolContext, _handle_squad_task_update
+
+    _threads, tasks = stores
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    ctx = ToolContext(
+        user_id=42,
+        chat_id=-42,
+        work_dir="/tmp",
+        user_data={},
+        agent=None,
+        agent_mode="normal",
+        executing_agent_id="FE",
+    )
+
+    async def call(**params: Any) -> Any:
+        return await _handle_squad_task_update(params, ctx)
+
+    with (
+        patch("koda.squads.get_squad_task_store", return_value=tasks),
+        patch("koda.squads.get_squad_access_service", return_value=Mock(require_task_access=AsyncMock())),
+    ):
+        yield call
+
+
+async def _claimed_task(stores: tuple[SquadThreadStore, SquadTaskStore]) -> TaskDescriptor:
+    threads, tasks = stores
+    task = await tasks.create_task(
+        thread_id=await _seed_thread(threads), title="t", assigner_agent_id="PM", assigned_agent_id="FE"
+    )
+    return await tasks.claim_task(task_id=task.id, agent_id="FE")
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "key",
+    [
+        "claim_expiry_count",
+        "claim_refused",
+        "claim_expires_at",
+        "coordination_parent_message_id",
+        "handoff_correlation_id",
+        "operator_override",
+    ],
+)
+async def test_an_agent_cannot_set_server_owned_task_metadata(
+    stores: tuple[SquadThreadStore, SquadTaskStore], task_tool: Callable[..., Awaitable[Any]], key: str
+) -> None:
+    """An agent's metadata_patch may not touch the claim bookkeeping or the coordination fields (D-339)."""
+    _threads, tasks = stores
+    task = await _claimed_task(stores)
+
+    result = await task_tool(task_id=task.id, new_status="in_progress", metadata_patch={"notes": "x", key: -5})
+
+    assert not result.success
+    assert key in result.output
+    assert "cannot be set by an agent" in result.output
+    after = await tasks.get_task(task.id)
+    assert after is not None
+    # Nothing of the call was applied: not the status, not the allowed key.
+    assert after.status == "claimed" and after.version == task.version
+    assert key not in after.metadata and "notes" not in after.metadata
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_an_agent_may_set_its_task_notes_and_the_server_keeps_full_access(
+    stores: tuple[SquadThreadStore, SquadTaskStore], task_tool: Callable[..., Awaitable[Any]]
+) -> None:
+    _threads, tasks = stores
+    task = await _claimed_task(stores)
+
+    result = await task_tool(
+        task_id=task.id, new_status="in_progress", metadata_patch={"notes": "halfway", "progress": 50}
+    )
+
+    assert result.success, result.output
+    after = await tasks.get_task(task.id)
+    assert after is not None and after.status == "in_progress"
+    assert after.metadata["notes"] == "halfway" and after.metadata["progress"] == 50
+
+    # The operator API writes keys an agent may not.
+    overridden = await tasks.update_task_status(
+        task_id=task.id,
+        new_status="done",
+        agent_id="PM",
+        metadata_patch={"operator_override": True, "actor_type": "operator"},
+        coordinator_override=True,
+    )
+    assert overridden.metadata["operator_override"] is True
+    assert overridden.metadata["notes"] == "halfway"
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_the_router_still_counts_and_clears_claim_bookkeeping(
+    stores: tuple[SquadThreadStore, SquadTaskStore],
+) -> None:
+    _threads, tasks = stores
+    task = await _claimed_task(stores)
+    assert await tasks.release_refused_claim(task_id=task.id, agent_id="FE") is True
+    assert (await tasks.get_task(task.id)).metadata["claim_refused"] is True  # type: ignore[union-attr]
+    [refused] = await tasks.sweep_expired_claims()
+    assert refused.refused is True
+
+    await tasks.claim_task(task_id=task.id, agent_id="FE")
+    pool = await tasks._ensure_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f'UPDATE "{_schema()}"."squad_tasks" SET claim_expires_at = NOW() - INTERVAL \'1 second\' WHERE id = $1',
+            task.id,
+        )
+    [expired] = await tasks.sweep_expired_claims()
+    assert expired.expiry_count == 1
+    after = await tasks.get_task(task.id)
+    assert after is not None
+    assert after.metadata["claim_expiry_count"] == 1 and "claim_refused" not in after.metadata

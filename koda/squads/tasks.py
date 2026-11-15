@@ -33,6 +33,11 @@ _ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "cancelled": set(),
     "escalated": set(),
 }
+# The task metadata an agent may set through the squad task tools, as the room PATCH has its
+# client allowlist. Every other key is the server's: the claim bookkeeping the router reads to
+# escalate a task (claim_expiry_count, claim_refused) and the fields the coordinator and the
+# operator API write. update_task_status itself takes any key, for the server's own writes (D-339).
+AGENT_TASK_METADATA_KEYS = frozenset({"notes", "progress"})
 
 
 class TaskNotFoundError(KeyError):
