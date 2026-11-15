@@ -26,6 +26,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from cryptography.fernet import Fernet, InvalidToken
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from koda.logging_config import get_logger
 
@@ -41,6 +43,8 @@ from .settings import (
 log = get_logger(__name__)
 
 MASTER_KEY_FINGERPRINT_LABEL = b"koda.control_plane.master_key.fingerprint.v1"
+# HKDF info label of the HMAC signing key derived from the master key.
+SIGNING_KEY_INFO = b"koda.control_plane.signing_key.v1"
 _FINGERPRINT_KEY_NAME = "control_plane_master_key"
 _FINGERPRINT_PREFIX_LENGTH = 12
 _RECOVERY_DOC = "docs/operations/backup-restore.md#master-key-recovery"
@@ -549,8 +553,11 @@ def mask_secret(value: str) -> str:
 
 
 def get_signing_key() -> bytes:
-    """Return the master key bytes for HMAC-style signing operations.
+    """Return the HMAC signing key: HKDF-SHA256 of the master key under its own label.
 
-    Callers MUST treat the value as opaque and never log or expose it.
+    The master key is the Fernet (encryption) key, so it is never used as an HMAC key
+    itself (M1-E6-T3). The derived key depends only on the master key, so signatures
+    stay valid across restarts. Callers MUST treat the value as opaque and never log
+    or expose it.
     """
-    return _load_master_key()
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=SIGNING_KEY_INFO).derive(_load_master_key())

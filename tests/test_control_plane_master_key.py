@@ -27,6 +27,7 @@ The SQL behind the fingerprint helpers runs against real Postgres in
 from __future__ import annotations
 
 import ast
+import base64
 import hashlib
 import hmac
 import logging
@@ -38,6 +39,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from koda.control_plane import crypto
 
@@ -121,6 +124,13 @@ def _mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
 
 
+def _signing_key_for(master_key: bytes) -> bytes:
+    """M1-E6-T3: the HMAC key is HKDF-SHA256 of the master key under its own label."""
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=b"koda.control_plane.signing_key.v1").derive(
+        master_key
+    )
+
+
 # Loading never creates a key
 
 
@@ -183,8 +193,40 @@ def test_present_key_loads_and_loose_permissions_are_tightened(key_paths: Simple
     _write_key(key_paths.key_file, key + b"\n", mode=0o644)
 
     assert crypto.decrypt_secret(crypto.encrypt_secret("round-trip")) == "round-trip"
-    assert crypto.get_signing_key() == key
+    assert crypto.get_signing_key() == _signing_key_for(key)
     assert _mode(key_paths.key_file) == 0o600
+
+
+def test_signing_key_is_derived_and_differs_from_the_fernet_key(key_paths: SimpleNamespace) -> None:
+    """M1-E6-T3 (TD-078, R-07): HMAC signing no longer reuses the encryption key."""
+    key = Fernet.generate_key()
+    _write_key(key_paths.key_file, key)
+    fernet_key = base64.urlsafe_b64decode(key)
+
+    signing_key = crypto.get_signing_key()
+
+    assert signing_key == _signing_key_for(key)
+    assert len(signing_key) == 32
+    # Not the key file, nor the decoded Fernet key or either of its halves (HMAC and AES keys).
+    assert signing_key not in {key, fernet_key, fernet_key[:16], fernet_key[16:]}
+
+
+def test_signatures_verify_across_a_restart_and_old_ones_do_not(key_paths: SimpleNamespace) -> None:
+    """The derived key depends only on the key file, so a signature made before a supervisor
+    restart verifies after it; one made with the raw master key no longer verifies."""
+    from koda.integrations.custom_mcp_registry import CustomServerPayload, compute_validation_signature
+
+    key = Fernet.generate_key()
+    _write_key(key_paths.key_file, key)
+    payload = CustomServerPayload(server_key="custom_probe", display_name="Probe", command=["probe-mcp"])
+    before_restart = compute_validation_signature(payload, crypto.get_signing_key())
+
+    # ensure_master_key clears the caches at every supervisor start.
+    crypto.clear_fernet_cache()
+    after_restart = compute_validation_signature(payload, crypto.get_signing_key())
+
+    assert hmac.compare_digest(before_restart, after_restart)
+    assert not hmac.compare_digest(compute_validation_signature(payload, key), after_restart)
 
 
 @pytest.mark.parametrize("loose_mode", [0o444, 0o440, 0o404, 0o640, 0o604, 0o660])
@@ -193,7 +235,7 @@ def test_key_readable_by_group_or_others_is_tightened(key_paths: SimpleNamespace
     key = Fernet.generate_key()
     _write_key(key_paths.key_file, key, mode=loose_mode)
 
-    assert crypto.get_signing_key() == key
+    assert crypto.get_signing_key() == _signing_key_for(key)
     # Group and other access go; the owner's bits stay as they were (nothing is added).
     assert _mode(key_paths.key_file) == loose_mode & 0o700
 
@@ -208,11 +250,11 @@ def test_key_mode_the_filesystem_ignores_is_logged_once(
     monkeypatch.setattr(crypto.log, "warning", lambda event, **kw: warnings.append((event, kw)))
     monkeypatch.setattr(Path, "chmod", lambda self, mode: None)
 
-    assert crypto.get_signing_key() == key
-    assert crypto.get_signing_key() == key
+    assert crypto.get_signing_key() == _signing_key_for(key)
+    assert crypto.get_signing_key() == _signing_key_for(key)
     # ensure_master_key clears the Fernet cache at every start; that must not re-arm the warning.
     crypto.clear_fernet_cache()
-    assert crypto.get_signing_key() == key
+    assert crypto.get_signing_key() == _signing_key_for(key)
     assert [event for event, _ in warnings] == ["control_plane_master_key_permissions_too_open"]
     assert warnings[0][1]["mode"] == "0o644"
 
@@ -230,8 +272,8 @@ def test_key_on_unchangeable_mount_is_used_and_exposure_logged(
 
     monkeypatch.setattr(Path, "chmod", _read_only)
 
-    assert crypto.get_signing_key() == key
-    assert crypto.get_signing_key() == key
+    assert crypto.get_signing_key() == _signing_key_for(key)
+    assert crypto.get_signing_key() == _signing_key_for(key)
     # Reported once per file and mode, although the key is read on every use.
     assert [event for event, _ in warnings] == ["control_plane_master_key_permissions_too_open"]
     assert warnings[0][1]["mode"] == "0o444"
