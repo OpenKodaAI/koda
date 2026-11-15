@@ -212,23 +212,21 @@ class SquadAccessService:
                      WHERE squad_id = $1""",
                 thread.squad_id,
             )
-            is_coordinator = bool(coordinator_id and coordinator_id == agent_id)
-            role = "coordinator" if is_coordinator else ""
-            joined_at: datetime | None = None
-            if participant is not None:
-                role = str(participant["role"] or role or "worker")
-                joined_at = participant["joined_at"]
-                if participant["left_at"] is not None:
-                    raise SquadAccessError(f"agent {agent_id!r} is not an active participant")
-                if bool(participant["paused"]) and require_write and not is_coordinator:
-                    raise SquadAccessError(f"agent {agent_id!r} is paused in thread {thread_id!r}")
-            elif not is_coordinator:
+            # The coordinator role only adds coordination actions (paused writes,
+            # history before joined_at, task overrides) on threads the coordinator
+            # takes part in. It is never a pass into a thread it is not party to,
+            # private side-threads included.
+            if participant is None:
                 raise SquadAccessError(f"agent {agent_id!r} is not a participant of thread {thread_id!r}")
+            is_coordinator = bool(coordinator_id and coordinator_id == agent_id)
+            role = str(participant["role"] or ("coordinator" if is_coordinator else "") or "worker")
+            joined_at: datetime | None = participant["joined_at"]
+            if participant["left_at"] is not None:
+                raise SquadAccessError(f"agent {agent_id!r} is not an active participant")
+            if bool(participant["paused"]) and require_write and not is_coordinator:
+                raise SquadAccessError(f"agent {agent_id!r} is paused in thread {thread_id!r}")
 
-            if thread.visibility == "private" and participant is None and not is_coordinator:
-                raise SquadAccessError(f"private thread {thread_id!r} is visible only to participants")
-
-            if message_id is not None and participant is not None and joined_at is not None:
+            if message_id is not None and joined_at is not None:
                 await self._assert_message_visible_after(
                     conn=conn,
                     thread_id=str(thread_id),
@@ -374,7 +372,8 @@ class SquadAccessService:
         principal: SquadPrincipal,
         reason: str,
     ) -> None:
-        with suppress(Exception):
+        # Break-glass access exists only with its audit event: a failed write refuses it.
+        try:
             await conn.execute(
                 f"""INSERT INTO "{self._schema}"."audit_events"
                         (agent_id, timestamp, event_type, pod_name, trace_id, details_json)
@@ -390,6 +389,8 @@ class SquadAccessService:
                     }
                 ),
             )
+        except Exception as exc:
+            raise SquadAccessError("break-glass access refused: its audit event could not be written") from exc
 
     def visible_after_for(self, access: ThreadAccess) -> datetime | None:
         """Return the lower message timestamp bound for timeline reads."""
