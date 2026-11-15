@@ -153,6 +153,8 @@ def _answers(query: str) -> _Turn:
         return _Turn(text="FE: launch page built.")
     if "Task request [review]" in query:
         return _Turn(text="QA: launch page reviewed.")
+    if "Task request [specialist]" in query:
+        return _Turn(text="FE: launch page drafted.")
     return _Turn(text="Noted.")
 
 
@@ -288,6 +290,8 @@ HANDOFF_TO_FE_AND_QA = _HandoffPlanner(
     ],
     ["FE", "QA"],
 )
+# The planner names a destination but gives it no task; the engine gives it one (D-015).
+TASK_LESS_HANDOFF_TO_FE = _HandoffPlanner([], ["FE"])
 
 
 def _semantic_result() -> SemanticRoutingResult:
@@ -606,3 +610,38 @@ async def test_a_destination_whose_run_fails_fails_the_handoff_and_the_coordinat
     delivered = application.bot.texts(GROUP_CHAT_ID)
     assert any("falhou" in message for message in delivered), delivered
     assert any(message.startswith(FINAL_ANSWER) for message in delivered), delivered
+
+
+@pytest.mark.parametrize("channel", ["telegram", "web"])
+async def test_a_task_less_handoff_is_answered_by_the_destination_and_then_the_coordinator(
+    agent_db: str,
+    squad_stores: tuple[Any, Any],
+    queue_state: None,
+    application: Any,
+    routing_inputs: ExitStack,
+    monkeypatch: pytest.MonkeyPatch,
+    channel: str,
+) -> None:
+    thread_store, task_store = squad_stores
+    provider = _ScriptedClaude(_answers).install(monkeypatch)
+    _use_planner(routing_inputs, TASK_LESS_HANDOFF_TO_FE)
+
+    if channel == "telegram":
+        thread = await _post_telegram_message(thread_store, application)
+    else:
+        thread = await _post_web_message(thread_store, application, routing_inputs)
+    answer = await _wait_for_coordinator_answer(thread_store, thread.id)
+
+    [synthesis_query] = [query for query in provider.queries if SYNTHESIS_MARKER in query]
+    assert "FE / " in synthesis_query and "FE: launch page drafted." in synthesis_query
+    assert answer["content"].startswith(FINAL_ANSWER)
+    history = await thread_store.thread_history(thread_id=thread.id, limit=200)
+    assert _handoff_statuses(history) == ["requested", "returned"]
+    assert {task.assigned_agent_id: task.status for task in await task_store.list_tasks(thread_id=thread.id)} == {
+        "FE": "done"
+    }
+    assert [status for status, _query in await _runtime_task_statuses(agent_db)] == ["completed", "completed"]
+    if channel == "telegram":
+        delivered = application.bot.texts(GROUP_CHAT_ID)
+        for text in ("FE: launch page drafted.", FINAL_ANSWER):
+            assert any(message.startswith(text) for message in delivered), delivered
