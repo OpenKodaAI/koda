@@ -64,7 +64,7 @@ function LiveAgentsListComponent({
       )}
     >
       <header className="flex items-center justify-between gap-2">
-        <h3 className="m-0 text-[var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+        <h3 className="m-0 text-[length:var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
           {title}
         </h3>
         {viewAllHref ? (
@@ -79,7 +79,7 @@ function LiveAgentsListComponent({
       </header>
 
       {entries.length === 0 ? (
-        <p className="m-0 text-[var(--font-size-sm)] text-[var(--text-tertiary)]">
+        <p className="m-0 text-[length:var(--font-size-sm)] text-[var(--text-tertiary)]">
           {emptyLabel}
         </p>
       ) : (
@@ -118,7 +118,7 @@ function LiveAgentsListComponent({
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="truncate text-[var(--font-size-sm)] font-medium text-[var(--text-primary)]">
+                      <span className="truncate text-[length:var(--font-size-sm)] font-medium text-[var(--text-primary)]">
                         {entry.agent.label}
                       </span>
                       <span

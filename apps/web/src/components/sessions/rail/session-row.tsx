@@ -85,7 +85,7 @@ function SessionRowImpl({
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <div className="flex items-baseline justify-between gap-2">
             <span className="flex min-w-0 items-center gap-1.5">
-              <span className="truncate text-[var(--font-size-sm)] font-medium leading-[1.3] text-[var(--text-primary)]">
+              <span className="truncate text-[length:var(--font-size-sm)] font-medium leading-[1.3] text-[var(--text-primary)]">
                 {agentLabel}
               </span>
             </span>

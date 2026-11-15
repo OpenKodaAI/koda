@@ -320,7 +320,7 @@ export default function CostsPage() {
             <p className="eyebrow truncate">
               {t("costs.page.distributionEyebrow", undefined)}
             </p>
-            <h3 className="mt-1 truncate text-[var(--font-size-sm)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+            <h3 className="mt-1 truncate text-[length:var(--font-size-sm)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
               {t("costs.page.distributionTitle", undefined)}
             </h3>
           </div>

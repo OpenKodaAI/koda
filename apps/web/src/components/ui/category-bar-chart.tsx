@@ -72,7 +72,7 @@ export function CategoryBarChart({
       {...props}
     >
       <CardHeader className="flex flex-row items-start justify-between gap-3 border-b border-[var(--divider-hair)] p-0 pb-2.5">
-        <CardTitle className="truncate text-[var(--font-size-sm)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+        <CardTitle className="truncate text-[length:var(--font-size-sm)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
           {heading}
         </CardTitle>
         {controls ? <div className="shrink-0">{controls}</div> : null}

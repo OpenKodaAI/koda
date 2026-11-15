@@ -48,7 +48,7 @@ export function UiCard({ block, onAction }: UiCardProps) {
             />
           ) : null}
           {body ? (
-            <div className="text-[var(--font-size-md)] leading-[1.55] text-[var(--text-primary)]">
+            <div className="text-[length:var(--font-size-md)] leading-[1.55] text-[var(--text-primary)]">
               <SessionRichText content={body} variant="assistant" />
             </div>
           ) : null}

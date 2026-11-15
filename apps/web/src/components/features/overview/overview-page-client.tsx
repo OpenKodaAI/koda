@@ -387,7 +387,7 @@ function OverviewPageContent() {
 
           <section className="w-full" {...tourAnchor("overview.history")}>
             <header className="mb-3 flex items-baseline justify-between px-3">
-              <h3 className="m-0 text-[var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+              <h3 className="m-0 text-[length:var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
                 {t("overview.history.title")}
               </h3>
               <span className="eyebrow">{t("overview.history.subtitle")}</span>

@@ -258,7 +258,7 @@ export function ExecutionTable({
                   strokeWidth={1.5}
                   aria-hidden
                 />
-                <p className="m-0 text-[var(--font-size-sm)] text-[var(--text-tertiary)]">
+                <p className="m-0 text-[length:var(--font-size-sm)] text-[var(--text-tertiary)]">
                   {t("executions.table.noResults")}
                 </p>
               </div>
@@ -308,7 +308,7 @@ export function ExecutionTable({
                   />
                 </div>
 
-                <p className="relative m-0 line-clamp-2 text-[var(--font-size-sm)] leading-[1.5] text-[var(--text-primary)]">
+                <p className="relative m-0 line-clamp-2 text-[length:var(--font-size-sm)] leading-[1.5] text-[var(--text-primary)]">
                   {execution.query_text ||
                     t("executions.table.noQueryRegistered")}
                 </p>
@@ -351,7 +351,7 @@ export function ExecutionTable({
               strokeWidth={1.5}
               aria-hidden
             />
-            <p className="m-0 text-[var(--font-size-sm)] text-[var(--text-tertiary)]">
+            <p className="m-0 text-[length:var(--font-size-sm)] text-[var(--text-tertiary)]">
               {t("executions.table.noResults")}
             </p>
           </div>

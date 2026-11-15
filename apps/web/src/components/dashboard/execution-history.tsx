@@ -158,7 +158,7 @@ function ExecutionHistoryComponent({
 
   if (rows.length === 0) {
     return (
-      <p className={cn("m-0 text-[var(--font-size-sm)] text-[var(--text-tertiary)]", className)}>
+      <p className={cn("m-0 text-[length:var(--font-size-sm)] text-[var(--text-tertiary)]", className)}>
         {strings.empty}
       </p>
     );
@@ -198,13 +198,13 @@ function ExecutionHistoryComponent({
                   color={agent.color}
                   size="xs"
                 />
-                <span className="truncate text-[var(--font-size-sm)] font-medium text-[var(--text-primary)]">
+                <span className="truncate text-[length:var(--font-size-sm)] font-medium text-[var(--text-primary)]">
                   {agent.label}
                 </span>
               </div>
 
               {/* Column 2: query preview */}
-              <p className="m-0 min-w-0 truncate text-[var(--font-size-sm)] text-[var(--text-secondary)]">
+              <p className="m-0 min-w-0 truncate text-[length:var(--font-size-sm)] text-[var(--text-secondary)]">
                 {query}
               </p>
 

@@ -313,7 +313,7 @@ function SessionRailImpl({
     >
       <div className="flex h-14 shrink-0 items-center justify-between px-3">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-[var(--font-size-sm)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+          <span className="truncate text-[length:var(--font-size-sm)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
             {t("chat.rail.title", undefined)}
           </span>
           {showUpdatingIndicator ? (
@@ -373,7 +373,7 @@ function SessionRailImpl({
               {createMode === "conversation" ? (
                 <>
                   <div className="mb-2 mt-3 px-1 pt-1">
-                    <span className="text-[var(--font-size-sm)] font-medium text-[var(--text-secondary)]">
+                    <span className="text-[length:var(--font-size-sm)] font-medium text-[var(--text-secondary)]">
                       {t("chat.rail.newChatAgent", undefined)}
                     </span>
                   </div>
@@ -469,7 +469,7 @@ function SessionRailImpl({
                 </>
               ) : (
                 <div className="mt-3 flex flex-col gap-2">
-                  <p className="px-2 text-[var(--font-size-sm)] text-[var(--text-secondary)]">
+                  <p className="px-2 text-[length:var(--font-size-sm)] text-[var(--text-secondary)]">
                     {t("chat.rail.create.roomHelper", undefined)}
                   </p>
                   <PopoverClose asChild>
@@ -480,7 +480,7 @@ function SessionRailImpl({
                       className={cn(
                         "flex h-9 items-center justify-center gap-2 rounded-[var(--radius-panel-sm)]",
                         "border border-[color:var(--border-strong)] bg-transparent",
-                        "text-[var(--font-size-sm)] font-medium text-[var(--text-primary)]",
+                        "text-[length:var(--font-size-sm)] font-medium text-[var(--text-primary)]",
                         "transition-colors duration-[120ms] hover:bg-[var(--hover-tint)]",
                         "disabled:border-[color:var(--border-subtle)] disabled:text-[var(--text-quaternary)]",
                       )}
@@ -537,7 +537,7 @@ function SessionRailImpl({
               strokeWidth={1.5}
               aria-hidden
             />
-            <p className="m-0 text-[var(--font-size-sm)] text-[var(--text-tertiary)]">
+            <p className="m-0 text-[length:var(--font-size-sm)] text-[var(--text-tertiary)]">
               {isSearching
                 ? t("chat.rail.noResults", undefined)
                 : t("chat.rail.empty", undefined)}

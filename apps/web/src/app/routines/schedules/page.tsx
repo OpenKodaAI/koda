@@ -929,7 +929,7 @@ function RoutineExecutionsDrawer({
               strokeWidth={1.5}
               aria-hidden
             />
-            <p className="m-0 text-[var(--font-size-sm)] font-medium text-[var(--text-primary)]">
+            <p className="m-0 text-[length:var(--font-size-sm)] font-medium text-[var(--text-primary)]">
               {t("schedules.executions.empty", undefined)}
             </p>
             <p className="m-0 max-w-[32rem] text-[0.75rem] leading-[1.5] text-[var(--text-tertiary)]">

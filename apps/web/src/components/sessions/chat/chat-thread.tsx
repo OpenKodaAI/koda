@@ -282,10 +282,10 @@ function ChatThreadImpl({
             <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--tone-danger-bg)] text-[var(--tone-danger-text)]">
               <MessageSquareText className="icon-md" strokeWidth={1.75} />
             </span>
-            <p className="m-0 text-[var(--font-size-md)] font-medium text-[var(--text-primary)]">
+            <p className="m-0 text-[length:var(--font-size-md)] font-medium text-[var(--text-primary)]">
               {t("chat.thread.errorGeneric", undefined)}
             </p>
-            <p className="m-0 text-[var(--font-size-sm)] text-[var(--text-tertiary)]">{error}</p>
+            <p className="m-0 text-[length:var(--font-size-sm)] text-[var(--text-tertiary)]">{error}</p>
           </div>
         ) : !hasConversation ? (
           <div className="mx-auto flex h-full w-full max-w-[620px] flex-col items-center justify-center gap-3 px-6 text-center">
@@ -298,7 +298,7 @@ function ChatThreadImpl({
               {emptyTitle ??
                 t("sessions.thread.heroTitle", undefined)}
             </h2>
-            <p className="m-0 max-w-[480px] text-[var(--font-size-sm)] leading-[1.55] text-[var(--text-tertiary)]">
+            <p className="m-0 max-w-[480px] text-[length:var(--font-size-sm)] leading-[1.55] text-[var(--text-tertiary)]">
               {emptyDescription ??
                 t("sessions.thread.heroHelper", undefined)}
             </p>

@@ -49,7 +49,7 @@ export function MarkdownViewer({ content, filename }: MarkdownViewerProps) {
       {showRaw ? (
         <TextViewer text={content} filename={null} showLineCount={false} />
       ) : (
-        <div className="max-h-[60vh] overflow-auto px-4 py-3 text-[var(--font-size-md)] leading-[1.6] text-[var(--text-primary)]">
+        <div className="max-h-[60vh] overflow-auto px-4 py-3 text-[length:var(--font-size-md)] leading-[1.6] text-[var(--text-primary)]">
           <SessionRichText content={content} variant="assistant" />
         </div>
       )}

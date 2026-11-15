@@ -85,7 +85,7 @@ function CardTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElem
   return (
     <h3
       data-slot="card-title"
-      className={cn("text-[var(--font-size-md)] font-medium leading-none tracking-[var(--tracking-tight)]", className)}
+      className={cn("text-[length:var(--font-size-md)] font-medium leading-none tracking-[var(--tracking-tight)]", className)}
       {...props}
     />
   );
@@ -95,7 +95,7 @@ function CardDescription({ className, ...props }: React.HTMLAttributes<HTMLDivEl
   return (
     <div
       data-slot="card-description"
-      className={cn("text-[var(--font-size-sm)] text-[var(--text-tertiary)]", className)}
+      className={cn("text-[length:var(--font-size-sm)] text-[var(--text-tertiary)]", className)}
       {...props}
     />
   );

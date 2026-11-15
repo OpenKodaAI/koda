@@ -53,7 +53,7 @@ export function UiChoice({ block, agentId, sessionId }: UiChoiceProps) {
       className="rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] p-3 flex flex-col gap-3"
       data-submitted={blockSubmit.isSubmitted || undefined}
     >
-      <p className="m-0 text-[var(--font-size-md)] text-[var(--text-primary)]">
+      <p className="m-0 text-[length:var(--font-size-md)] text-[var(--text-primary)]">
         {prompt}
       </p>
       <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">

@@ -192,7 +192,7 @@ export function DLQTable({
                         strokeWidth={1.5}
                         aria-hidden
                       />
-                      <p className="m-0 text-[var(--font-size-sm)] text-[var(--text-tertiary)]">
+                      <p className="m-0 text-[length:var(--font-size-sm)] text-[var(--text-tertiary)]">
                         {t("dlq.table.noFailures")}
                       </p>
                     </div>
@@ -244,7 +244,7 @@ export function DLQTable({
                       <span className="text-[var(--text-quaternary)]">·</span>
                       <RetryIndicator entry={entry} />
                     </div>
-                    <p className="m-0 line-clamp-2 text-[var(--font-size-sm)] leading-[1.5] text-[var(--text-primary)]">
+                    <p className="m-0 line-clamp-2 text-[length:var(--font-size-sm)] leading-[1.5] text-[var(--text-primary)]">
                       {truncateText(entry.query_text, 110)}
                     </p>
                     <p className="m-0 line-clamp-2 text-[0.75rem] leading-[1.5] text-[var(--tone-danger-text)]">
@@ -282,7 +282,7 @@ export function DLQTable({
               strokeWidth={1.5}
               aria-hidden
             />
-            <p className="m-0 text-[var(--font-size-sm)] text-[var(--text-tertiary)]">
+            <p className="m-0 text-[length:var(--font-size-sm)] text-[var(--text-tertiary)]">
               {t("dlq.table.noFailures")}
             </p>
           </div>

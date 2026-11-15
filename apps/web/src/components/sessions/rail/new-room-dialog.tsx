@@ -196,7 +196,7 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
               </span>
               <h2
                 id="new-room-dialog-title"
-                className="m-0 text-[var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]"
+                className="m-0 text-[length:var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]"
               >
                 {t("sessions.room.create.title", undefined)}
               </h2>
@@ -211,7 +211,7 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
             </button>
           </header>
 
-          <p className="mt-1 text-[var(--font-size-sm)] leading-[1.5] text-[var(--text-tertiary)]">
+          <p className="mt-1 text-[length:var(--font-size-sm)] leading-[1.5] text-[var(--text-tertiary)]">
             {t("sessions.room.create.helper", undefined)}
           </p>
 
@@ -229,7 +229,7 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
               }}
               placeholder={t("sessions.room.create.namePlaceholder", undefined)}
               maxLength={120}
-              className="h-9 w-full rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-[var(--font-size-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] outline-none transition-[border-color,background-color,box-shadow] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] focus:border-[color:var(--focus-ring)] focus:bg-[var(--panel)] focus:shadow-[0_0_0_1px_var(--focus-ring)]"
+              className="h-9 w-full rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-[length:var(--font-size-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] outline-none transition-[border-color,background-color,box-shadow] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] focus:border-[color:var(--focus-ring)] focus:bg-[var(--panel)] focus:shadow-[0_0_0_1px_var(--focus-ring)]"
             />
           </label>
 
@@ -253,12 +253,12 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder={t("sessions.room.create.searchAgents", undefined)}
-                className="flex-1 bg-transparent text-[var(--font-size-sm)] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
+                className="flex-1 bg-transparent text-[length:var(--font-size-sm)] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
               />
             </label>
             <div className="mt-1 flex max-h-[260px] flex-col gap-0.5 overflow-y-auto rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] p-1">
               {filteredAgents.length === 0 ? (
-                <div className="px-3 py-4 text-center text-[var(--font-size-sm)] text-[var(--text-tertiary)]">
+                <div className="px-3 py-4 text-center text-[length:var(--font-size-sm)] text-[var(--text-tertiary)]">
                   {t("sessions.room.create.agentsEmpty", undefined)}
                 </div>
               ) : (
@@ -286,7 +286,7 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
                         className="h-7 w-7 shrink-0"
                       />
                       <div className="flex min-w-0 flex-1 flex-col">
-                        <span className="truncate text-[var(--font-size-sm)] font-medium">
+                        <span className="truncate text-[length:var(--font-size-sm)] font-medium">
                           {agent.label || agent.id}
                         </span>
                         {agent.label && agent.label !== agent.id ? (
@@ -332,7 +332,7 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
           </div>
 
           {error ? (
-            <p className="mt-3 text-[var(--font-size-sm)] text-[var(--tone-danger-dot)]">
+            <p className="mt-3 text-[length:var(--font-size-sm)] text-[var(--tone-danger-dot)]">
               {error}
             </p>
           ) : null}
@@ -342,7 +342,7 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
               type="button"
               onClick={handleCancel}
               disabled={submitting}
-              className="inline-flex h-9 items-center justify-center rounded-[var(--radius-panel-sm)] px-3.5 text-[var(--font-size-sm)] font-medium text-[var(--text-secondary)] transition-colors duration-[120ms] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] disabled:opacity-60"
+              className="inline-flex h-9 items-center justify-center rounded-[var(--radius-panel-sm)] px-3.5 text-[length:var(--font-size-sm)] font-medium text-[var(--text-secondary)] transition-colors duration-[120ms] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] disabled:opacity-60"
             >
               {t("common.cancel", undefined)}
             </button>
@@ -351,7 +351,7 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
               onClick={() => void handleSubmit()}
               disabled={submitting || !name.trim() || selectedIds.length === 0}
               className={cn(
-                "inline-flex h-9 items-center justify-center gap-1.5 rounded-[var(--radius-panel-sm)] px-3.5 text-[var(--font-size-sm)] font-medium",
+                "inline-flex h-9 items-center justify-center gap-1.5 rounded-[var(--radius-panel-sm)] px-3.5 text-[length:var(--font-size-sm)] font-medium",
                 "bg-[var(--accent)] text-[var(--accent-text)] transition-[background-color,color] duration-[120ms] hover:bg-[var(--accent-hover)]",
                 "disabled:bg-[var(--panel-strong)] disabled:text-[var(--text-quaternary)]",
               )}

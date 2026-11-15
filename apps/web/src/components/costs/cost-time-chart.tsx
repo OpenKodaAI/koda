@@ -206,7 +206,7 @@ export function CostTimeChart({
         <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <p className="eyebrow truncate">{t("costs.chart.eyebrow")}</p>
-            <h3 className="mt-1 truncate text-[var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+            <h3 className="mt-1 truncate text-[length:var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
               {t("costs.chart.title")}
             </h3>
           </div>

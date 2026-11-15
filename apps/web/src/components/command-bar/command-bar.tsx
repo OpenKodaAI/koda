@@ -205,7 +205,7 @@ export function CommandBar({
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           placeholder={placeholder}
-          className="block h-7 w-full min-w-0 bg-transparent text-[var(--font-size-md)] leading-[1.4] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
+          className="block h-7 w-full min-w-0 bg-transparent text-[length:var(--font-size-md)] leading-[1.4] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
           aria-label={placeholder}
         />
         {shortcutHint && isInline ? (

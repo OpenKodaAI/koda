@@ -100,7 +100,7 @@ export function PageSectionHeader({
         {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
         <h2
           className={cn(
-            compact ? "m-0 text-[var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]" : "app-section__title",
+            compact ? "m-0 text-[length:var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]" : "app-section__title",
             eyebrow && !compact && "mt-2",
           )}
         >

@@ -104,7 +104,7 @@ export const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>
           autoComplete="off"
           spellCheck
           className={cn(
-            "min-h-[56px] max-h-[200px] flex-1 resize-none bg-transparent py-1 text-[var(--font-size-md)] leading-[1.5]",
+            "min-h-[56px] max-h-[200px] flex-1 resize-none bg-transparent py-1 text-[length:var(--font-size-md)] leading-[1.5]",
             "text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] outline-none",
           )}
         />

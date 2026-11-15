@@ -148,7 +148,7 @@ export function ExecutionDetailModal({
             </div>
 
             {data.query_text ? (
-              <p className="m-0 mt-4 line-clamp-3 text-[var(--font-size-sm)] leading-[1.55] text-[var(--text-secondary)] lg:text-[0.9375rem]">
+              <p className="m-0 mt-4 line-clamp-3 text-[length:var(--font-size-sm)] leading-[1.55] text-[var(--text-secondary)] lg:text-[0.9375rem]">
                 {data.query_text}
               </p>
             ) : null}

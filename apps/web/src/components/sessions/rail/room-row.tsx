@@ -87,7 +87,7 @@ function RoomRowImpl({ entry, active, onSelect, onRequestDelete }: RoomRowProps)
             {entry.squad.memberCount}
           </span>
         </span>
-        <span className="min-w-0 flex-1 truncate text-[var(--font-size-sm)] font-medium leading-[1.3] text-[var(--text-primary)]">
+        <span className="min-w-0 flex-1 truncate text-[length:var(--font-size-sm)] font-medium leading-[1.3] text-[var(--text-primary)]">
           {title}
         </span>
         <span

@@ -81,7 +81,7 @@ export function Drawer({
           <header className="flex items-start justify-between gap-3 border-b border-[var(--divider-hair)] px-5 py-4">
             <div className="min-w-0 flex-1">
               {title ? (
-                <DialogPrimitive.Title className="m-0 text-[var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+                <DialogPrimitive.Title className="m-0 text-[length:var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
                   {title}
                 </DialogPrimitive.Title>
               ) : null}

@@ -283,7 +283,7 @@ function ThreadReplyCard({
     return (
       <section className="border-t border-[color:var(--divider-hair)] px-4 pb-4 pt-3">
         <header className="mb-2 flex items-center justify-between gap-2">
-          <h3 className="m-0 text-[var(--font-size-sm)] font-medium text-[var(--text-primary)]">
+          <h3 className="m-0 text-[length:var(--font-size-sm)] font-medium text-[var(--text-primary)]">
             {t("sessions.context.thread.title", undefined)}
           </h3>
           {openObligations.length > 0 ? (
@@ -325,7 +325,7 @@ function SuspendedCard({
   return (
     <section className="rounded-[var(--radius-panel)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] shadow-[var(--shadow-xs)]">
       <header className="flex items-center justify-between gap-2 px-3.5 pt-3 pb-2">
-        <h3 className="m-0 text-[var(--font-size-sm)] font-medium text-[var(--text-primary)]">
+        <h3 className="m-0 text-[length:var(--font-size-sm)] font-medium text-[var(--text-primary)]">
           {title}
         </h3>
         {trailing}

@@ -229,7 +229,7 @@ export function ApprovalPrompt({
     <div className="mt-2 flex flex-col gap-3 rounded-[var(--radius-panel)] border border-[color:var(--tone-warning-border)] bg-[color:var(--tone-warning-bg)] px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
         <StatusDot tone="warning" pulse />
-        <span className="text-[var(--font-size-sm)] font-medium text-[var(--tone-warning-text)]">
+        <span className="text-[length:var(--font-size-sm)] font-medium text-[var(--tone-warning-text)]">
           {t("generated.sessions.approval_required_c1a6f49c")}
         </span>
         {toolName ? (
@@ -240,7 +240,7 @@ export function ApprovalPrompt({
       </div>
 
       {reasons && reasons.length > 0 ? (
-        <ul className="m-0 list-disc space-y-1 pl-5 text-[var(--font-size-sm)] text-[var(--text-secondary)]">
+        <ul className="m-0 list-disc space-y-1 pl-5 text-[length:var(--font-size-sm)] text-[var(--text-secondary)]">
           {reasons.map((reason, index) => (
             <li key={index}>{reason}</li>
           ))}

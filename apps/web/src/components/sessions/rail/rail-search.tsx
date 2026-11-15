@@ -46,7 +46,7 @@ export function RailSearch({ value, onChange, placeholder, loading = false, clas
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={resolvedPlaceholder}
-        className="search-input--custom-clear flex-1 bg-transparent text-[var(--font-size-sm)] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
+        className="search-input--custom-clear flex-1 bg-transparent text-[length:var(--font-size-sm)] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
       />
       {value ? (
         <button

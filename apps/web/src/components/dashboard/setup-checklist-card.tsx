@@ -146,7 +146,7 @@ export function SetupChecklistCard({ snapshot }: SetupChecklistCardProps) {
     >
       <header className="flex items-start justify-between gap-3">
         <div className="flex flex-col">
-          <h2 className="m-0 text-[var(--font-size-sm)] font-medium text-[var(--text-primary)]">
+          <h2 className="m-0 text-[length:var(--font-size-sm)] font-medium text-[var(--text-primary)]">
             {t("dashboard.checklist.title")}
           </h2>
           <p className="m-0 text-[12px] text-[var(--text-tertiary)]">

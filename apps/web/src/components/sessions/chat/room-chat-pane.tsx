@@ -818,7 +818,7 @@ export function RoomChatPane({
           </div>
         ) : stable.showBlockingError ? (
           <div className="mx-auto flex h-full w-full max-w-[480px] flex-col items-center justify-center gap-2 px-6 text-center">
-            <p className="m-0 text-[var(--font-size-sm)] text-[var(--tone-danger-dot)]">
+            <p className="m-0 text-[length:var(--font-size-sm)] text-[var(--tone-danger-dot)]">
               {query.error?.message ??
                 t("sessions.room.loadError", undefined)}
             </p>
@@ -831,7 +831,7 @@ export function RoomChatPane({
             <h2 className="m-0 text-[1.5rem] font-medium leading-[1.15] text-[var(--text-primary)] sm:text-[1.75rem]">
               {t("sessions.room.empty.title", undefined)}
             </h2>
-            <p className="m-0 max-w-[420px] text-[var(--font-size-sm)] leading-[1.55] text-[var(--text-tertiary)]">
+            <p className="m-0 max-w-[420px] text-[length:var(--font-size-sm)] leading-[1.55] text-[var(--text-tertiary)]">
               {t("sessions.room.empty.helper", undefined)}
             </p>
           </div>
@@ -1070,7 +1070,7 @@ export function RoomChatPane({
               {draft ? (
                 <div
                   aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words py-1 text-[var(--font-size-md)] leading-[1.5] text-[var(--text-primary)]"
+                  className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words py-1 text-[length:var(--font-size-md)] leading-[1.5] text-[var(--text-primary)]"
                 >
                   <RoomMentionRichText
                     text={draft}
@@ -1092,7 +1092,7 @@ export function RoomChatPane({
                 rows={1}
                 placeholder={t("sessions.room.composer.placeholder", undefined)}
                 className={cn(
-                  "relative min-h-[56px] max-h-[200px] w-full resize-none bg-transparent py-1 text-[var(--font-size-md)] leading-[1.5]",
+                  "relative min-h-[56px] max-h-[200px] w-full resize-none bg-transparent py-1 text-[length:var(--font-size-md)] leading-[1.5]",
                   "caret-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] outline-none selection:bg-[var(--tone-info-bg)]",
                   draft ? "text-transparent" : "text-[var(--text-primary)]",
                 )}

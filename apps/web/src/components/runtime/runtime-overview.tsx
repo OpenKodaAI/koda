@@ -444,7 +444,7 @@ export function RuntimeOverviewScreen({
           <header className="flex items-baseline justify-between gap-3 border-b border-[var(--divider-hair)] px-3 py-2.5">
             <div className="min-w-0">
               <p className="eyebrow truncate">{translate("generated.runtime.runtime_5359aeee")}</p>
-              <h3 className="m-0 mt-1 truncate text-[var(--font-size-sm)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+              <h3 className="m-0 mt-1 truncate text-[length:var(--font-size-sm)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
                 {t("runtime.overview.liveExecutions")}
               </h3>
             </div>
