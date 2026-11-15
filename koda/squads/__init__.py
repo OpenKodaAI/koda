@@ -63,12 +63,14 @@ from koda.squads.delivery import (
     summarize_route_quality_history,
 )
 from koda.squads.dispatch import (
+    SquadThreadNotRunnableError,
     SquadTurnDispatchResult,
     dispatch_squad_turn,
     record_squad_dispatch_unavailable,
     record_squad_handoff_event,
     record_squad_mention_unresolved,
     record_squad_routing_decision,
+    squad_thread_turn_refusal,
 )
 from koda.squads.event_hub import SquadEventHub, get_squad_event_hub
 from koda.squads.membership import (
@@ -223,6 +225,7 @@ __all__ = [
     "SquadTaskStore",
     "SquadTelegramBinding",
     "SquadTelegramBindingService",
+    "SquadThreadNotRunnableError",
     "SquadThreadStore",
     "SquadTurnDispatchResult",
     "SynthesisReadiness",
@@ -295,6 +298,7 @@ __all__ = [
     "request_needs_coordination",
     "select_targets",
     "should_use_coordinator_engine",
+    "squad_thread_turn_refusal",
     "synthesis_gate_metric",
     "sync_thread_participants_from_squad",
     "validate_eligibility",

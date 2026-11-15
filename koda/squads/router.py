@@ -3,7 +3,9 @@
 Wraps ``SquadTaskStore.sweep_expired_claims`` in a long-running coroutine so a
 coordinator's claim TTL eventually triggers a revert when a worker goes
 silent. When a thread store is available, each reverted claim emits a
-``system_event`` so the transcript shows what happened.
+``system_event`` so the transcript shows what happened. Each reverted task is
+then dispatched again to its planned assignee once, and escalated on a later
+expiry (D-097).
 
 Phase 5 will wire this into ``supervisor.start()``. Until then, callers can
 start it manually (``squad_router_tick`` sweeps one squad's expired claims).
@@ -137,10 +139,22 @@ class SquadRouter:
                         thread_id=claim.thread_id,
                         task_id=claim.task_id,
                     )
+        if expired:
+            from koda.services.queue_manager import redispatch_expired_squad_claim
+
+            for claim in expired:
+                try:
+                    await redispatch_expired_squad_claim(task_id=claim.task_id)
+                except Exception:
+                    log.exception(
+                        "squad_router_claim_redispatch_failed",
+                        thread_id=claim.thread_id,
+                        task_id=claim.task_id,
+                    )
         return expired
 
     async def sweep_squad_claims(self, squad_id: str) -> SweepReport:
-        """Revert the expired claims of ``squad_id``'s threads, and nothing else.
+        """Revert the expired claims of ``squad_id``'s threads, then dispatch or escalate those tasks, and nothing else.
 
         This is the ``squad_router_tick`` sweep: a coordinator reaches only its own squad. The
         other sweeps (auto-election, timeouts, dead letters, budgets, open handoffs) cover every
@@ -229,6 +243,7 @@ class SquadRouter:
             "task_id": claim.task_id,
             "previously_assigned_agent_id": claim.previously_assigned_agent_id,
             "version_after": claim.version_after,
+            "expiry_count": claim.expiry_count,
         }
         try:
             await self._thread_store.post_thread_message(
@@ -429,7 +444,12 @@ class SquadRouter:
                     thread_id=thread_id,
                     event_type="budget_exceeded_auto_pause",
                     content=f"[budget_exceeded_auto_pause] thread paused at ${cost:.4f} of ${cap:.4f}",
-                    metadata={"event_type": "budget_exceeded_auto_pause", "cost_usd": cost, "budget_usd_cap": cap},
+                    metadata={
+                        "event_type": "budget_exceeded_auto_pause",
+                        "reason": "budget",
+                        "cost_usd": cost,
+                        "budget_usd_cap": cap,
+                    },
                 )
                 pauses += 1
         return alerts, pauses

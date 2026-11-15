@@ -176,8 +176,41 @@ async def test_sweep_reverts_expired_claim(stores: tuple[SquadThreadStore, Squad
     fresh = await tasks.get_task(task.id)
     assert fresh is not None
     assert fresh.status == "pending"
-    assert fresh.assigned_agent_id is None
+    # The planned assignee is kept, so the router can dispatch the task to it again (D-097).
+    assert fresh.assigned_agent_id == "W"
     assert fresh.claim_token is None
+    assert fresh.metadata["claim_expiry_count"] == 1
+    assert expired[0].expiry_count == 1
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_sweep_keeps_the_expired_claims_of_a_thread_that_reached_its_budget_cap(
+    stores: tuple[SquadThreadStore, SquadTaskStore],
+) -> None:
+    from decimal import Decimal
+
+    threads, tasks = stores
+    thread = await threads.create_thread(
+        workspace_id="acme", squad_id="build", title="t", budget_usd_cap=Decimal("1.00")
+    )
+    task = await tasks.create_task(thread_id=thread.id, title="t", assigner_agent_id="PM")
+    await tasks.claim_task(task_id=task.id, agent_id="W", ttl_seconds=1)
+    pool = await tasks._ensure_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"""UPDATE "{_schema()}"."squad_tasks" SET claim_expires_at = NOW() - INTERVAL '1 second' WHERE id = $1""",
+            task.id,
+        )
+        await conn.execute(
+            f'UPDATE "{_schema()}"."squad_threads" SET cost_usd_accum = 1.00 WHERE id = $1',
+            thread.id,
+        )
+
+    # The thread runs no turn, so the claim waits rather than being dispatched again into a refusal.
+    assert await tasks.sweep_expired_claims() == []
+    fresh = await tasks.get_task(task.id)
+    assert fresh is not None and fresh.status == "claimed"
 
 
 @pytest.mark.postgres

@@ -65,6 +65,8 @@ class ExpiredClaim:
     thread_id: str
     previously_assigned_agent_id: str | None
     version_after: int
+    # How many times this task's claim has expired, this time included.
+    expiry_count: int = 1
 
 
 @dataclass
@@ -457,6 +459,10 @@ class SquadTaskStore:
     async def sweep_expired_claims(self, *, batch_size: int = 50, squad_id: str | None = None) -> list[ExpiredClaim]:
         """Atomically revert tasks past their claim TTL back to ``pending``.
 
+        The planned assignee is kept, so the squad router can dispatch the task to it again, and
+        ``metadata.claim_expiry_count`` counts the expiries (D-097). Only the tasks of threads
+        that can run turns are swept: open and under their budget cap. A paused or spent
+        thread's claims wait until it is open again under its cap (D-075).
         With ``squad_id``, only the tasks of that squad's threads are swept.
         Returns a record per reverted task so callers can emit thread events
         or notify the prior assignee.
@@ -465,29 +471,36 @@ class SquadTaskStore:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""WITH expired AS (
-                        SELECT id, assigned_agent_id
-                          FROM "{self._schema}"."squad_tasks"
-                         WHERE status = 'claimed'
-                           AND claim_expires_at IS NOT NULL
-                           AND claim_expires_at < NOW()
-                           AND ($2::text IS NULL OR thread_id IN (
-                               SELECT th.id FROM "{self._schema}"."squad_threads" AS th WHERE th.squad_id = $2
-                           ))
-                         ORDER BY claim_expires_at ASC
+                        SELECT t.id, t.assigned_agent_id
+                          FROM "{self._schema}"."squad_tasks" AS t
+                          JOIN "{self._schema}"."squad_threads" AS th ON th.id = t.thread_id
+                         WHERE t.status = 'claimed'
+                           AND t.claim_expires_at IS NOT NULL
+                           AND t.claim_expires_at < NOW()
+                           AND th.status = 'open'
+                           AND (th.budget_usd_cap IS NULL
+                                OR th.budget_usd_cap <= 0
+                                OR th.cost_usd_accum < th.budget_usd_cap)
+                           AND ($2::text IS NULL OR th.squad_id = $2)
+                         ORDER BY t.claim_expires_at ASC
                          LIMIT $1
-                           FOR UPDATE SKIP LOCKED
+                           FOR UPDATE OF t SKIP LOCKED
                     )
                     UPDATE "{self._schema}"."squad_tasks" AS t
                        SET status = 'pending',
-                           assigned_agent_id = NULL,
                            claim_token = NULL,
                            claim_expires_at = NULL,
+                           metadata_json = COALESCE(t.metadata_json, '{{}}'::jsonb) || jsonb_build_object(
+                               'claim_expiry_count',
+                               COALESCE((t.metadata_json->>'claim_expiry_count')::int, 0) + 1
+                           ),
                            version = t.version + 1,
                            updated_at = NOW()
                       FROM expired
                      WHERE t.id = expired.id
                  RETURNING t.id, t.thread_id, t.version,
-                           expired.assigned_agent_id AS prior_agent""",
+                           expired.assigned_agent_id AS prior_agent,
+                           (t.metadata_json->>'claim_expiry_count')::int AS expiry_count""",
                 max(1, min(int(batch_size), 500)),
                 squad_id,
             )
@@ -497,6 +510,7 @@ class SquadTaskStore:
                 thread_id=str(r["thread_id"]),
                 previously_assigned_agent_id=r["prior_agent"],
                 version_after=int(r["version"]),
+                expiry_count=int(r["expiry_count"] or 1),
             )
             for r in rows
         ]

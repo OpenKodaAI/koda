@@ -480,3 +480,97 @@ async def test_two_runtimes_sweeping_the_same_handoff_at_once_queue_one_synthesi
 
     assert len(_final_syntheses(turn_stubs)) == 1
     assert await _handoff_statuses(threads, thread_id) == ["requested", "returned"]
+
+
+async def _expire_claim(tasks: SquadTaskStore, task_id: str) -> None:
+    """Move the task's claim deadline into the past, as a worker that went silent leaves it."""
+    pool = await tasks._ensure_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"""UPDATE "{_schema()}"."squad_tasks"
+                   SET claim_expires_at = NOW() - INTERVAL '1 second'
+                 WHERE id = $1 AND status = 'claimed'""",
+            task_id,
+        )
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_an_expired_claim_is_dispatched_again_to_its_planned_assignee(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    threads, tasks = stores
+    _thread_id, parent, task_ids = await _start_handoff(threads, tasks)
+    await _expire_claim(tasks, task_ids["QA"])
+
+    report = await _router(threads, tasks).sweep_once()
+
+    assert [claim.task_id for claim in report.expired_claims] == [task_ids["QA"]]
+    qa_task = await tasks.get_task(task_ids["QA"])
+    assert qa_task is not None
+    # The planned assignee is kept and holds a fresh claim for the dispatched turn (D-097).
+    assert qa_task.status == "claimed"
+    assert qa_task.assigned_agent_id == "QA"
+    assert qa_task.metadata["claim_expiry_count"] == 1
+    [redispatch] = [call.kwargs for call in turn_stubs.await_args_list]
+    assert redispatch["target_agent_id"] == "QA"
+    assert redispatch["squad_task_id"] == task_ids["QA"]
+    assert redispatch["parent_message_id"] == parent
+    assert redispatch["delegation_request_id"] == f"coord-{task_ids['QA']}"
+    assert f"Task request [review] {task_ids['QA']}" in redispatch["query_text"]
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_claim_that_expires_again_is_escalated_and_the_handoff_completes_as_failed(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    threads, tasks = stores
+    thread_id, parent, task_ids = await _start_handoff(threads, tasks)
+    await _finish_turn(thread_id=thread_id, parent=parent, task_id=task_ids["FE"], agent_id="FE")
+    router = _router(threads, tasks)
+
+    for _ in range(2):
+        await _expire_claim(tasks, task_ids["QA"])
+        await router.sweep_once()
+
+    qa_task = await tasks.get_task(task_ids["QA"])
+    assert qa_task is not None
+    assert qa_task.status == "escalated"
+    assert qa_task.assigned_agent_id == "QA"
+    # The system posts QA's result, which says why, so the coordinator synthesis discloses it.
+    history = await threads.thread_history(thread_id=thread_id, limit=100)
+    [qa_result] = [
+        row
+        for row in history
+        if row["type"] == "task_result" and (row.get("metadata") or {}).get("squad_task_id") == task_ids["QA"]
+    ]
+    assert qa_result["from"] == "system"
+    assert qa_result["metadata"]["assigned_agent_id"] == "QA"
+    assert qa_result["metadata"]["payload"]["status"] == "failed"
+    assert "expired 2 times" in qa_result["content"]
+    [synthesis] = _final_syntheses(turn_stubs)
+    assert synthesis["target_agent_id"] == "PM"
+    assert "Timeouts/bloqueios declarados:\n- QA: failed" in synthesis["query_text"]
+    assert await _handoff_statuses(threads, thread_id) == ["requested", "failed"]
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_paused_thread_keeps_its_expired_claims_until_it_reopens(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    threads, tasks = stores
+    thread_id, _parent, task_ids = await _start_handoff(threads, tasks)
+    await threads.update_thread_status(thread_id, "paused")
+    await _expire_claim(tasks, task_ids["QA"])
+    router = _router(threads, tasks)
+
+    assert (await router.sweep_once()).expired_claims == []
+    qa_task = await tasks.get_task(task_ids["QA"])
+    assert qa_task is not None and qa_task.status == "claimed"
+    assert turn_stubs.await_count == 0
+
+    await threads.update_thread_status(thread_id, "open")
+    assert [claim.task_id for claim in (await router.sweep_once()).expired_claims] == [task_ids["QA"]]
+    assert [call.kwargs["target_agent_id"] for call in turn_stubs.await_args_list] == ["QA"]

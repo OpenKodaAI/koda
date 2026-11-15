@@ -2550,12 +2550,29 @@ async def patch_dashboard_room_route(request: web.Request) -> web.Response:
     new_status = payload.get("status")
     if new_status is not None:
         new_status = str(new_status).strip()
+        previous = await thread_store.get_thread(thread_id) if new_status == "paused" else None
         try:
             await thread_store.update_thread_status(thread_id, new_status)
         except KeyError:
             return web.json_response({"error": "thread not found"}, status=404)
         except ValueError as exc:
             return web.json_response({"error": str(exc)}, status=400)
+        if previous is not None and previous.status != "paused":
+            # The room says why it stopped, as the budget auto-pause does (D-075).
+            auth = _request_auth_context(request)
+            paused_by = f"operator:{auth.username}" if auth is not None else "operator"
+            metadata = {"event_type": "thread_paused", "reason": "operator", "paused_by": paused_by}
+            try:
+                await thread_store.post_thread_message(
+                    thread_id=thread_id,
+                    from_agent="system",
+                    content=f"[thread_paused] thread paused by {paused_by}",
+                    message_type="system_event",
+                    metadata=metadata,
+                )
+                await thread_store.notify_event(thread_id=thread_id, event_type="thread_paused", data=metadata)
+            except Exception:
+                log.exception("dashboard_room_pause_event_failed", thread_id=thread_id)
 
     return web.json_response({"ok": True})
 

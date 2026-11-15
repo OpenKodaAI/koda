@@ -73,9 +73,17 @@ Before broad rollout, run these in canary:
 - Force a provider timeout; router must emit sanitized `run_failed` or
   `task_result(status=failed)`.
 - Let a claimed task exceed `SQUAD_CLAIM_TTL_S`; router must return it to
-  `pending` and emit `claim_expired`.
+  `pending` with its planned assignee kept, emit `claim_expired`, and dispatch
+  the task to that assignee again. When the claim expires a second time the
+  router escalates the task: the system posts a failed `task_result` that
+  says so, the task ends `escalated`, and the coordinator synthesis discloses
+  it. Claims of a paused or spent thread wait until it is open again.
 - Exceed 80% and then 100% of a thread budget; router must emit alert and
-  auto-pause the thread.
+  auto-pause the thread (`budget_exceeded_auto_pause`, reason `budget`).
+  A thread that is not `open`, or whose spend reached its cap, runs no agent
+  turn on any path: web, Telegram, the inbox, unblocked tasks or synthesis.
+- Pause a room from the dashboard; the room must show a `thread_paused`
+  system event with reason `operator`.
 - Disable a Telegram bot admin permission; bind/strict checks must fail closed.
 
 ## Rollback

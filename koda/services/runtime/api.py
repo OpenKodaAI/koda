@@ -1587,22 +1587,27 @@ async def _runtime_send_session_message(request: web.Request) -> web.Response:
         target_agent_id = str(squad_payload.get("target_agent_id") or AGENT_ID or "default").strip() or "default"
 
         from koda.services.queue_manager import enqueue_squad_agent_task
+        from koda.squads import SquadThreadNotRunnableError
 
-        task_id = await enqueue_squad_agent_task(
-            application=application,
-            user_id=user_id,
-            chat_id=chat_id,
-            query_text=text,
-            executing_agent_id=target_agent_id,
-            squad_thread_id=squad_thread_id,
-            squad_task_id=str(squad_payload.get("squad_task_id") or "").strip() or None,
-            parent_message_id=str(squad_payload.get("parent_message_id") or "").strip() or None,
-            delegation_chain=delegation_chain,
-            delegation_request_id=str(squad_payload.get("delegation_request_id") or "").strip() or None,
-            delegation_origin_agent_id=str(squad_payload.get("delegation_origin_agent_id") or "").strip() or None,
-            telegram_message_thread_id=optional_int(squad_payload.get("telegram_message_thread_id")),
-            bot_override=_SilentRuntimeBot(),
-        )
+        try:
+            task_id = await enqueue_squad_agent_task(
+                application=application,
+                user_id=user_id,
+                chat_id=chat_id,
+                query_text=text,
+                executing_agent_id=target_agent_id,
+                squad_thread_id=squad_thread_id,
+                squad_task_id=str(squad_payload.get("squad_task_id") or "").strip() or None,
+                parent_message_id=str(squad_payload.get("parent_message_id") or "").strip() or None,
+                delegation_chain=delegation_chain,
+                delegation_request_id=str(squad_payload.get("delegation_request_id") or "").strip() or None,
+                delegation_origin_agent_id=str(squad_payload.get("delegation_origin_agent_id") or "").strip() or None,
+                telegram_message_thread_id=optional_int(squad_payload.get("telegram_message_thread_id")),
+                bot_override=_SilentRuntimeBot(),
+            )
+        except SquadThreadNotRunnableError as exc:
+            # The thread is paused, closed or spent (D-075).
+            return web.json_response({"error": str(exc)}, status=409)
         return web.json_response(
             {
                 "accepted": True,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 from koda.logging_config import get_logger
@@ -21,6 +22,27 @@ from koda.squads.delivery import (
 )
 
 log = get_logger(__name__)
+
+
+class SquadThreadNotRunnableError(RuntimeError):
+    """The squad thread is not open, or its spend reached its budget cap, so it runs no agent turn (D-075)."""
+
+
+def squad_thread_turn_refusal(thread: Any) -> str | None:
+    """Why ``thread`` runs no agent turn now, or None when it may run one (D-075).
+
+    A thread runs turns only while its status is ``open`` and, when it has a budget cap, its
+    spend is under the cap. The router's budget sweep pauses a thread at the cap, and an
+    operator can pause it; until it is open again under its cap, no turn of it is queued.
+    """
+    status = getattr(thread, "status", None)
+    if isinstance(status, str) and status != "open":
+        return f"thread is {status}"
+    cap = getattr(thread, "budget_usd_cap", None)
+    cost = getattr(thread, "cost_usd_accum", None)
+    if isinstance(cap, int | float | Decimal) and isinstance(cost, int | float | Decimal) and 0 < cap <= cost:
+        return f"thread spend ${float(cost):.4f} reached its budget cap ${float(cap):.4f}"
+    return None
 
 
 class _SilentSquadDispatchMessage:
@@ -517,8 +539,25 @@ async def dispatch_squad_turn(
     The local Telegram runtime can execute another squad member in-process by
     setting ``executing_agent_id`` on the queued item. When no runtime
     application is available, delivery falls back to the configured message bus.
+    A thread that is not open, or whose spend reached its budget cap, gets no
+    turn: nothing is sent, and the result says why (D-075).
     """
     thread_id = str(getattr(thread, "id", "") or "")
+    refusal = squad_thread_turn_refusal(thread)
+    if refusal is not None:
+        log.info(
+            "squad_turn_refused",
+            thread_id=thread_id,
+            target_agent_id=target_agent_id,
+            squad_task_id=squad_task_id,
+            reason=refusal,
+        )
+        return SquadTurnDispatchResult(
+            target_agent_id=target_agent_id,
+            transport="none",
+            dispatched=False,
+            error=refusal,
+        )
     runtime_application = application or _runtime_application_or_none()
     resolved_user_id = int(user_id or getattr(thread, "owner_user_id", 0) or 0)
     resolved_chat_id = int(chat_id or getattr(thread, "telegram_chat_id", 0) or 0)
