@@ -87,6 +87,7 @@ ANONYMOUS_ROOT_ROUTES = frozenset(
         ("GET", "/"),
         ("GET", "/setup"),
         ("GET", "/health"),
+        ("GET", "/ready"),
         ("GET", "/openapi/control-plane.json"),
         ("GET", "/cluster/status"),
     }

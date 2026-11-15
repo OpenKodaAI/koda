@@ -11332,6 +11332,24 @@
         "security": []
       }
     },
+    "/ready": {
+      "get": {
+        "summary": "Control-plane readiness",
+        "description": "Answers 200 when every critical dependency answers (the runtime kernel, and Postgres when STATE_BACKEND=postgres) and 503 while one is down. /health stays a liveness probe. The body names the failed check, never an internal target.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Every critical dependency answered"
+          },
+          "503": {
+            "description": "A critical dependency is down"
+          }
+        },
+        "tags": [
+          "Health"
+        ]
+      }
+    },
     "/health": {
       "get": {
         "summary": "Control-plane health",
