@@ -50,7 +50,6 @@ export function CommandBar({
   const [activeIndexRaw, setActiveIndex] = useState(0);
   const [isFocused, setIsFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   const commands = useMemo(() => buildCommands(ctx), [ctx]);
   const ranked = useMemo(() => rankCommands(commands, value), [commands, value]);
@@ -117,7 +116,10 @@ export function CommandBar({
     [activeIndex, execute, flat, mode, value],
   );
 
-  const open = mode === "modal" || isFocused || value.length > 0;
+  // The inline dropdown floats over the page (z-index 90), so it is open only
+  // while the input holds focus; otherwise it would cover the controls focus
+  // moves to next (M8-E1-T1).
+  const open = mode === "modal" || isFocused;
   const isInline = mode === "inline";
 
   // Anchor the inline dropdown to the input container's viewport position so
@@ -159,7 +161,6 @@ export function CommandBar({
 
   return (
     <div
-      ref={containerRef}
       className={cn(
         "relative flex flex-col",
         isInline ? "gap-4" : "min-h-0 flex-1 gap-0",
@@ -173,8 +174,7 @@ export function CommandBar({
           isInline
             ? cn(
                 "rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] py-2",
-                isFocused &&
-                  "border-[var(--focus-ring)] bg-[var(--panel)] outline outline-[color:var(--focus-ring)]",
+                "focus-within:border-[var(--focus-ring)] focus-within:bg-[var(--panel)] focus-within:outline focus-within:outline-[color:var(--focus-ring)]",
               )
             : "border-b border-[var(--divider-hair)] bg-transparent py-3",
         )}
@@ -201,15 +201,7 @@ export function CommandBar({
           }}
           onKeyDown={handleKeyDown}
           onFocus={() => setIsFocused(true)}
-          onBlur={(event) => {
-            if (
-              event.relatedTarget instanceof Node &&
-              containerRef.current?.contains(event.relatedTarget)
-            ) {
-              return;
-            }
-            setIsFocused(false);
-          }}
+          onBlur={() => setIsFocused(false)}
           placeholder={placeholder}
           className="block h-7 w-full min-w-0 bg-transparent text-[var(--font-size-md)] leading-[1.4] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
           aria-label={placeholder}
