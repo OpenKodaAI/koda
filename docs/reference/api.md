@@ -133,6 +133,8 @@ runtime environment that has already finished (for example completed, failed, ca
 `needs_review`) is left as it is: the route answers `409` with `error`, `action: "not_running"`,
 `ok: false`, its `status`, and its unchanged `final_phase`.
 
+`POST /api/runtime/sessions/messages` with a `squad` object queues a turn on that squad thread. The worker takes the identity the turn runs as from the thread, not from the request: the thread's `owner_user_id` and `telegram_chat_id`, or an id derived from the session when the thread has none. `squad.user_id`, `squad.chat_id` and `squad.telegram_chat_id` are ignored. A `squad.thread_id` that is not a UUID returns `400`, an unknown thread `404`.
+
 WebSocket routes:
 
 - `GET /ws/runtime`

@@ -17,11 +17,12 @@ import json
 import re
 import time
 import uuid
+from collections.abc import Iterable
 from contextlib import suppress
 from typing import Any
 
 from koda.agents.listen_notify import AgentInboxListener
-from koda.agents.models import AgentMessage, DelegationRequest, DelegationResult
+from koda.agents.models import AgentMessage, DelegationRequest, DelegationResult, broadcast_recipients
 from koda.logging_config import get_logger
 
 log = get_logger(__name__)
@@ -626,40 +627,25 @@ class PostgresMessageBus:
         from_agent: str,
         content: str,
         exclude: set[str] | None = None,
+        *,
+        thread_id: str,
+        recipients: Iterable[str],
     ) -> int:
         await self._ensure_started()
-        skip = set(exclude or set())
-        skip.add(from_agent)
-        agents = await self._list_known_agents()
         count = 0
-        for agent_id in agents:
-            if agent_id in skip:
-                continue
+        for agent_id in broadcast_recipients(from_agent, recipients, exclude):
             try:
                 if await self._inbox_size(agent_id) >= self._max_inbox_size:
                     continue
-                await self._insert(from_agent, agent_id, content, "text", {})
+                metadata = {"thread_id": thread_id, "kind": "agent_text"}
+                await self._insert(from_agent, agent_id, content, "text", metadata)
                 count += 1
             except Exception:
                 log.exception("postgres_bus_broadcast_send_failed", to=agent_id)
         return count
 
-    async def _list_known_agents(self) -> list[str]:
-        assert self._pool is not None
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""SELECT DISTINCT agent FROM (
-                       SELECT from_agent AS agent FROM "{self._schema}"."squad_messages"
-                       UNION
-                       SELECT to_agent  AS agent FROM "{self._schema}"."squad_messages"
-                    ) AS s
-                    ORDER BY agent"""
-            )
-        return [row["agent"] for row in rows]
-
     def list_agents(self) -> list[dict[str, Any]]:
-        # Best-effort in-process snapshot. Cross-process state lives in DB and
-        # is exposed via ``async list_known_agents`` for callers that need it.
+        # Best-effort in-process snapshot. Cross-process state lives in the DB.
         return [
             {"agent_id": aid, "inbox_size": -1, "inbox_max": self._max_inbox_size} for aid in sorted(self._inbox_events)
         ]

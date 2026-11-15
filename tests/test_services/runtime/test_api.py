@@ -1236,3 +1236,91 @@ async def test_runtime_cancel_reports_a_finished_task_as_a_conflict(tmp_path, ca
     else:
         assert payload == _CANCELLED_RESULT
     controller.cancel_task.assert_awaited_once_with(task_id=27, actor="runtime_api")  # type: ignore[attr-defined]
+
+
+_THREAD_ID = "6f0c1a52-0d3e-4c55-9a43-7a1f2c0d5e40"
+
+
+class _SquadThreadStoreStub:
+    def __init__(self, thread: object | None) -> None:
+        self.thread = thread
+        self.calls: list[str] = []
+
+    async def get_thread(self, thread_id: str) -> object | None:
+        self.calls.append(thread_id)
+        return self.thread
+
+
+def _squad_message_request(squad: dict[str, object]):
+    request = _request(headers={"X-Runtime-Token": "secret"})
+    request.json = AsyncMock(return_value={"text": "hello", "session_id": "squad-session", "squad": squad})
+    return request
+
+
+async def _send_squad_message(squad: dict[str, object], *, thread: object | None):
+    from koda.services.runtime.api import _runtime_send_session_message
+
+    controller = SimpleNamespace(_application=object())
+    store = _SquadThreadStoreStub(thread)
+    enqueue = AsyncMock(return_value=11)
+    with (
+        patch("koda.services.runtime.api.get_runtime_controller", return_value=controller),
+        patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "secret"),
+        patch("koda.squads.get_squad_thread_store", return_value=store),
+        patch("koda.services.queue_manager.enqueue_squad_agent_task", enqueue),
+    ):
+        response = await _runtime_send_session_message(_squad_message_request(squad))
+    return response, enqueue, store
+
+
+@pytest.mark.asyncio
+async def test_squad_message_runs_as_the_thread_owner_not_a_caller_chosen_user():
+    thread = SimpleNamespace(id=_THREAD_ID, owner_user_id=777, telegram_chat_id=-100555)
+    response, enqueue, store = await _send_squad_message(
+        {"thread_id": _THREAD_ID, "target_agent_id": "WORKER", "user_id": 1, "chat_id": 2, "telegram_chat_id": 3},
+        thread=thread,
+    )
+
+    assert response.status == 202
+    assert store.calls == [_THREAD_ID]
+    kwargs = enqueue.await_args.kwargs
+    assert (kwargs["user_id"], kwargs["chat_id"]) == (777, -100555)
+
+
+@pytest.mark.asyncio
+async def test_squad_message_without_thread_owner_uses_server_derived_dashboard_identity():
+    from koda.services.runtime.api import _dashboard_actor_id
+
+    thread = SimpleNamespace(id=_THREAD_ID, owner_user_id=None, telegram_chat_id=None)
+    response, enqueue, _store = await _send_squad_message(
+        {"thread_id": _THREAD_ID, "target_agent_id": "WORKER", "user_id": 1, "chat_id": 2},
+        thread=thread,
+    )
+
+    assert response.status == 202
+    kwargs = enqueue.await_args.kwargs
+    assert kwargs["user_id"] == _dashboard_actor_id(namespace="squad-user", session_id="squad-session")
+    assert kwargs["chat_id"] == -_dashboard_actor_id(namespace="squad-chat", session_id="squad-session")
+
+
+@pytest.mark.asyncio
+async def test_squad_message_for_an_unknown_thread_is_refused():
+    response, enqueue, _store = await _send_squad_message(
+        {"thread_id": _THREAD_ID, "target_agent_id": "WORKER", "user_id": 1, "chat_id": 2},
+        thread=None,
+    )
+
+    assert response.status == 404
+    enqueue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_squad_message_with_a_malformed_thread_id_is_a_client_error():
+    response, enqueue, store = await _send_squad_message(
+        {"thread_id": "not-a-uuid", "target_agent_id": "WORKER"},
+        thread=SimpleNamespace(owner_user_id=1, telegram_chat_id=1),
+    )
+
+    assert response.status == 400
+    assert store.calls == []
+    enqueue.assert_not_awaited()

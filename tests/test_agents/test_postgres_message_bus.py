@@ -251,13 +251,32 @@ async def test_persist_delegation_result_addresses_original_caller(monkeypatch: 
 
 @pytest.mark.postgres
 @pytest.mark.asyncio
-async def test_broadcast_skips_sender_and_excluded(bus_factory) -> None:  # type: ignore[no-untyped-def]
+async def test_broadcast_reaches_only_thread_participants(bus_factory, clean_squad_messages: str) -> None:  # type: ignore[no-untyped-def]
+    import asyncpg  # type: ignore[import-not-found]
+
     seed = bus_factory()
-    # Make three agents observable by inserting any message touching them.
-    await seed.send("a", "b", "seed-1")
-    await seed.send("c", "d", "seed-2")
-    await seed.send("a", "c", "seed-3")
+    # Agents from other threads and workspaces, and pseudo-agents, are known to
+    # ``squad_messages``; a broadcast must not reach any of them.
+    await seed.send("other-workspace-agent", "b", "seed-1")
+    await seed.send("system", "user:42", "seed-2")
+    await seed.send("operator:alice", "c", "seed-3")
     bus = bus_factory()
-    count = await bus.broadcast("a", "ping", exclude={"d"})
-    # Known agents: a, b, c, d. Exclude {a (sender), d}. Should reach b and c.
+    thread_id = "00000000-0000-4000-8000-000000000040"
+    count = await bus.broadcast(
+        "a",
+        "ping",
+        exclude={"d"},
+        thread_id=thread_id,
+        recipients=["a", "b", "c", "d", "system", "user:42", "operator:alice", ""],
+    )
+    # Sender a and excluded d are skipped, and pseudo-agents are never recipients.
     assert count == 2
+    conn = await asyncpg.connect(clean_squad_messages)
+    try:
+        rows = await conn.fetch(
+            f'''SELECT to_agent, thread_id::text AS thread_id FROM "{_schema()}"."squad_messages"
+                 WHERE content = 'ping' ORDER BY to_agent'''
+        )
+    finally:
+        await conn.close()
+    assert [(row["to_agent"], row["thread_id"]) for row in rows] == [("b", thread_id), ("c", thread_id)]

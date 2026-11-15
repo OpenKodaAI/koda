@@ -43,26 +43,37 @@ async def test_inbox_full(bus: InMemoryMessageBus) -> None:
 
 
 @pytest.mark.asyncio
-async def test_broadcast(bus: InMemoryMessageBus) -> None:
+async def test_broadcast_reaches_only_the_given_thread_participants(bus: InMemoryMessageBus) -> None:
     bus._ensure_inbox("agent-1")
     bus._ensure_inbox("agent-2")
     bus._ensure_inbox("agent-3")
-    count = await bus.broadcast("agent-1", "update")
+    bus._ensure_inbox("outsider")  # known to the bus, but not in the thread
+    count = await bus.broadcast("agent-1", "update", thread_id="t-1", recipients=["agent-1", "agent-2", "agent-3"])
     assert count == 2
     m2 = await bus.receive("agent-2", timeout=1)
     m3 = await bus.receive("agent-3", timeout=1)
     assert m2 is not None
     assert m3 is not None
     assert m2.content == "update"
+    assert m2.thread_id == "t-1"
+    assert m2.metadata["thread_id"] == "t-1"
+    assert await bus.receive("outsider", timeout=0.05) is None
 
 
 @pytest.mark.asyncio
 async def test_broadcast_with_exclude(bus: InMemoryMessageBus) -> None:
-    bus._ensure_inbox("agent-1")
-    bus._ensure_inbox("agent-2")
-    bus._ensure_inbox("agent-3")
-    count = await bus.broadcast("agent-1", "update", exclude={"agent-2"})
+    count = await bus.broadcast(
+        "agent-1", "update", exclude={"agent-2"}, thread_id="t-1", recipients=["agent-2", "agent-3"]
+    )
     assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_broadcast_never_reaches_pseudo_agents(bus: InMemoryMessageBus) -> None:
+    pseudo = ["system", "operator", "squad_router", "user:42", "operator:alice", "", "  "]
+    count = await bus.broadcast("agent-1", "update", thread_id="t-1", recipients=[*pseudo, "agent-2"])
+    assert count == 1
+    assert {a["agent_id"] for a in bus.list_agents()} == {"agent-2"}
 
 
 @pytest.mark.asyncio

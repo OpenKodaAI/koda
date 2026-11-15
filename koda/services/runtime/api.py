@@ -9,7 +9,7 @@ import mimetypes
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import quote
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from aiohttp import WSMsgType, web
 
@@ -1607,10 +1607,24 @@ async def _runtime_send_session_message(request: web.Request) -> web.Response:
             except (TypeError, ValueError):
                 return None
 
-        explicit_user_id = optional_int(squad_payload.get("user_id"))
-        explicit_chat_id = optional_int(squad_payload.get("chat_id") or squad_payload.get("telegram_chat_id"))
-        user_id = explicit_user_id or _dashboard_actor_id(namespace="squad-user", session_id=session_id)
-        chat_id = explicit_chat_id or -_dashboard_actor_id(namespace="squad-chat", session_id=session_id)
+        # The identity the task runs as comes from the thread, never from the
+        # caller: a mutate token must not pick another user's memory or chat.
+        from koda.squads import get_squad_thread_store
+
+        thread_store = get_squad_thread_store()
+        if thread_store is None:
+            return web.json_response({"error": "squad thread store is unavailable"}, status=503)
+        try:
+            UUID(squad_thread_id)
+        except ValueError:
+            return web.json_response({"error": "squad.thread_id is invalid"}, status=400)
+        thread = await thread_store.get_thread(squad_thread_id)
+        if thread is None:
+            return web.json_response({"error": "squad thread not found"}, status=404)
+        user_id = int(thread.owner_user_id or 0) or _dashboard_actor_id(namespace="squad-user", session_id=session_id)
+        chat_id = int(thread.telegram_chat_id or 0) or -_dashboard_actor_id(
+            namespace="squad-chat", session_id=session_id
+        )
         chain_raw = squad_payload.get("delegation_chain")
         delegation_chain = [str(item) for item in chain_raw] if isinstance(chain_raw, list) else []
         target_agent_id = str(squad_payload.get("target_agent_id") or AGENT_ID or "default").strip() or "default"

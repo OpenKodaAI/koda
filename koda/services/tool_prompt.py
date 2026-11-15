@@ -714,7 +714,8 @@ Communicate with other agents, delegate tasks, and coordinate work.
 - `agent_delegate` — Delegate a task and wait for result.
   Params: `{"to": "agent-2", "task": "Analyze report", "timeout": 60}`
 - `agent_list_agents` — List known agents and inbox status. Params: `{}`
-- `agent_broadcast` — Send a message to all known agents. Params: `{"message": "Status update"}`
+- `agent_broadcast` — Send a message to every participant of the current squad thread.
+  Params: `{"message": "Status update"}`
 
 ### Squad Threads
 Persistent multi-agent conversations scoped to a (workspace_id, squad_id).

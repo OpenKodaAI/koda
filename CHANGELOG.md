@@ -261,6 +261,13 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   can no longer open a private thread it is not in, squad sync never adds members to a
   private thread, and break-glass access is refused when its audit event cannot be written.
   (M1-E5-T1, M1-E5-T4, D-038, D-041, D-304, D-306)
+- `agent_broadcast` reaches only the active participants of the current squad thread, needs
+  write access to that thread, and tags each message with the thread. It never reaches
+  `system`, `user:*` or `operator:*` pseudo-agents or agents of other threads and workspaces;
+  outside a squad thread it is refused. A squad message sent to the runtime API runs as the
+  thread's owner and chat, not as a `user_id` or `chat_id` the caller supplies. The memory
+  engine refuses a recall without a positive `user_id` instead of returning every user's
+  memories. (M1-E5-T2, D-040, D-134, D-137)
 
 
 ### Added

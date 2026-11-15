@@ -7,6 +7,7 @@ land behind the same interface so cross-process delivery is a config flag.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any, Protocol, runtime_checkable
 
 from koda.agents.models import AgentMessage, DelegationRequest, DelegationResult
@@ -52,6 +53,9 @@ class MessageBus(Protocol):
         from_agent: str,
         content: str,
         exclude: set[str] | None = None,
+        *,
+        thread_id: str,
+        recipients: Iterable[str],
     ) -> int: ...
 
     def list_agents(self) -> list[dict[str, Any]]: ...

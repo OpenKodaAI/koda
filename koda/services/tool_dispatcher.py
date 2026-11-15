@@ -3783,11 +3783,35 @@ async def _handle_agent_broadcast(params: dict, ctx: ToolContext) -> AgentToolRe
     message = params.get("message", "")
     if not message:
         return AgentToolResult(tool="agent_broadcast", success=False, output="Missing 'message'.")
+    thread_id = ctx.squad_thread_id
+    if not thread_id:
+        return AgentToolResult(
+            tool="agent_broadcast",
+            success=False,
+            output="agent_broadcast needs a squad thread: it reaches only the current thread's participants.",
+        )
+    access_err = await _require_squad_thread_access(
+        tool="agent_broadcast",
+        ctx=ctx,
+        thread_id=thread_id,
+        require_write=True,
+    )
+    if access_err:
+        return access_err
 
     from koda.agents import get_message_bus
-    from koda.config import AGENT_ID
+    from koda.squads import get_squad_thread_store
 
-    count = await get_message_bus().broadcast(AGENT_ID or "default", message)
+    store = get_squad_thread_store()
+    if store is None:
+        return AgentToolResult(tool="agent_broadcast", success=False, output="Squad thread store unavailable.")
+    participants = await store.list_participants(thread_id=thread_id, active_only=True)
+    count = await get_message_bus().broadcast(
+        _ctx_agent_id(ctx),
+        message,
+        thread_id=thread_id,
+        recipients=[participant.agent_id for participant in participants],
+    )
     return AgentToolResult(tool="agent_broadcast", success=True, output=f"Broadcast sent to {count} agents.")
 
 
