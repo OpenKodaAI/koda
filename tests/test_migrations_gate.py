@@ -262,13 +262,17 @@ _UNRELEASED_VERSIONS = {
     "047_scheduler_events_and_dispatch_columns",
     "048_control_plane_master_key_fingerprint",
     "049_audit_events_type_lookup",
+    "050_approval_tables",
 }
 
 
 def test_the_migrations_added_since_the_latest_release_pass_the_index_check() -> None:
     gate = _gate()
     migrations = gate.current_migrations()
-    released = {m.version for m in migrations} - _UNRELEASED_VERSIONS
+    versions = [m.version for m in migrations]
+    # Migrations run in list order, so the unreleased ones are the end of the list.
+    assert set(versions[len(versions) - len(_UNRELEASED_VERSIONS) :]) == _UNRELEASED_VERSIONS
+    released = set(versions) - _UNRELEASED_VERSIONS
 
     assert gate.transactional_indexes_on_large_tables(migrations, previous_versions=released) == []
 

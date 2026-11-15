@@ -169,11 +169,18 @@ async def test_using_a_grant_in_one_agent_leaves_another_agents_grants_intact(
     assert set(await _grant_rows(conn, schema)) == {"grant-b"}
 
 
-async def test_a_failure_mid_write_leaves_the_grants_unchanged(approval_db: tuple[Any, str]) -> None:
+async def test_a_failure_mid_write_leaves_the_grants_unchanged(
+    approval_db: tuple[Any, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session_state_root: Path
+) -> None:
+    import koda.config as config_module
     from koda.state import approval_grants
     from koda.utils import approval
 
     conn, schema = approval_db
+    # The failed write falls back to the JSON file, which belongs in this test's own state root.
+    monkeypatch.setattr(config_module, "STATE_ROOT_DIR", tmp_path)
+    shared_file = session_state_root / "approval_grants.json"
+    shared_before = shared_file.read_bytes() if shared_file.exists() else None
     for grant_id, agent_id in (("grant-a1", "AGENT_A"), ("grant-a2", "AGENT_A"), ("grant-b", "AGENT_B")):
         await approval_grants.save_approval_grant(grant_id, _scope_grant(agent_id), ttl_seconds=600)
     approval._APPROVAL_GRANTS.update(await approval_grants.load_approval_grants())
@@ -187,6 +194,7 @@ async def test_a_failure_mid_write_leaves_the_grants_unchanged(approval_db: tupl
         await _drain_tasks_started_since(before)
 
     assert await _grant_rows(conn, schema) == unchanged
+    assert (shared_file.read_bytes() if shared_file.exists() else None) == shared_before
 
 
 _LEGACY_GRANTS_DDL = """CREATE TABLE "{schema}"."approval_grants" (
@@ -235,10 +243,14 @@ async def test_legacy_grants_get_a_derived_agent_or_expire_with_an_audit_row(pos
             now,
             now + 600,
         )
-        await conn.execute(
-            f"""INSERT INTO "{schema}"."sessions" (agent_id, user_id, session_id, provider, created_at, last_used)
-                VALUES ('AGENT_B', 7, 'sess-b', 'claude', '2026-11-15', '2026-11-15')"""
-        )
+        for agent_id, user_id, session_id in (("AGENT_B", 7, "sess-b"), ("KODA", 13, "sess-before-027")):
+            await conn.execute(
+                f"""INSERT INTO "{schema}"."sessions" (agent_id, user_id, session_id, provider, created_at, last_used)
+                    VALUES ($1, $2, $3, 'claude', '2026-11-15', '2026-11-15')""",
+                agent_id,
+                user_id,
+                session_id,
+            )
         for agent_id, user_id, chat_id in (("AGENT_C", 8, 800), ("AGENT_A", 9, 900), ("AGENT_B", 9, 900)):
             await conn.execute(
                 f"""INSERT INTO "{schema}"."tasks" (agent_id, user_id, chat_id, created_at)
@@ -259,6 +271,8 @@ async def test_legacy_grants_get_a_derived_agent_or_expire_with_an_audit_row(pos
             "g-two-chat-agents": ("", 9, None, 900, {}),
             # Its request names agent A and its session agent B.
             "g-two-scope-agents": ("", 7, "sess-b", None, {"issued_by_op_id": "op-a"}),
+            # Its session names KODA, which 027 wrote into every older session, whoever owned it.
+            "g-backfilled-session": ("", 13, "sess-before-027", None, {}),
             "g-nothing": ("", 10, None, 1000, {}),
             "g-not-json": ("", 11, None, None, None),
             # Already scoped to an agent: left as it is.

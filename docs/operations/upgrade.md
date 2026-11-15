@@ -211,7 +211,9 @@ These changes apply with or without rules:
   chat ids; earlier releases created them on first use with INTEGER ids.
   A stored grant with a blank `agent_id` gets the agent that the approval
   request that issued it, its session or its chat names, when exactly one
-  agent is named. Every other such grant expires, with one
+  agent is named. A session naming `KODA` counts as naming none, because
+  migration 027 set `KODA` on every session older than it. Every other such
+  grant expires, with one
   `approval.grant_expired` audit event (scope `global`) each, and its call
   asks for approval again. No grant without an agent applies to any agent.
 

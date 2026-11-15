@@ -3798,7 +3798,9 @@ class KnowledgeV2PostgresBackend:
                     # with a blank agent_id gets the agent that its stored scope
                     # (the approval request that issued it, its session) or its
                     # chat binding (the agent whose tasks ran in its chat)
-                    # names, when exactly one agent is named. Its payload, which
+                    # names, when exactly one agent is named. A session naming
+                    # 'KODA' names no agent: 027 wrote 'KODA' into every older
+                    # session, whichever agent owned it. Its payload, which
                     # the worker loads and matches on, gets the same agent. The
                     # CASEs keep a payload that is not a JSON object from
                     # failing the migration.
@@ -3826,6 +3828,7 @@ class KnowledgeV2PostgresBackend:
                                           JOIN "{schema}"."sessions" AS sess
                                             ON sess.user_id = legacy.user_id
                                            AND sess.session_id = legacy.session_id
+                                           AND sess.agent_id <> 'KODA'
                                          WHERE btrim(legacy.agent_id) = ''
                                         UNION
                                         SELECT legacy.grant_id, task.agent_id
