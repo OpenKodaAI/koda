@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -134,7 +135,10 @@ def test_legacy_id_repair_rewrites_every_listed_table(monkeypatch: pytest.Monkey
 
 def test_delete_purges_the_listed_delete_tables_and_nothing_else(monkeypatch: pytest.MonkeyPatch) -> None:
     executed: list[str] = []
-    monkeypatch.setattr(manager_mod, "execute", _recording_execute(executed))
+    record = _recording_execute(executed)
+    monkeypatch.setattr(manager_mod, "execute", record)
+    # Delete runs every statement in one transaction (M2-E2-T1).
+    monkeypatch.setattr(manager_mod, "with_connection", lambda fn: fn(SimpleNamespace(execute=record)))
     manager = manager_mod.ControlPlaneManager.__new__(manager_mod.ControlPlaneManager)
     manager._require_agent_row = lambda agent_id: ("ATLAS", {"id": "ATLAS"})  # type: ignore[method-assign]
 
