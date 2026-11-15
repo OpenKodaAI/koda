@@ -732,8 +732,9 @@ async def auth_recovery_codes_regenerate(request: web.Request) -> web.Response:
 
 
 async def auth_login(request: web.Request) -> web.Response:
-    started = time.monotonic()
     payload = await _json_payload(request)
+    # The floor counts from here, so a client that holds its body back cannot use it up (D-136).
+    started = time.monotonic()
     try:
         session = _auth_service().login(
             identifier=str(payload.get("identifier") or ""),

@@ -431,15 +431,21 @@ message would reveal that the account exists.
 - Every rejected sign-in takes the same time, so the response time does not tell which
   accounts exist. A login for an unknown identifier, or for a locked or disabled account,
   checks the password against a dummy Argon2 hash, the work a wrong password does. The login
-  route then answers no rejected sign-in sooner than 300 ms after it received it
+  route then answers no rejected sign-in sooner than 300 ms after it has read the request
   (`_FAILURE_TIMING_FLOOR_SECONDS` in `koda/control_plane/operator_auth.py`), and it waits
-  without blocking the control plane's other requests. On a host so busy that one Argon2 check
-  takes longer than 300 ms, rejections answer later, and a wrong password for an existing
-  account then takes a little longer than an unknown identifier: the time it takes to record
-  the failed attempt.
-  Only `POST /auth/login` is padded: the recovery route (`POST /auth/password/recover`) is
-  not, so there an unknown identifier and a wrong recovery code can still take different
-  times.
+  without blocking the control plane's other requests. The floor counts from when the request
+  body has arrived, so a client that sends its body slowly cannot use it up before its
+  credentials are checked. On a host so busy that one Argon2 check takes longer than 300 ms,
+  a rejection waits until the next multiple of 300 ms instead (600 ms, 900 ms and so on).
+  Only a wrong password for an existing account records the failed attempt, and that extra
+  time shows only when it pushes an answer past one of those marks.
+- Password recovery is not padded. On `POST /auth/password/recover`, an unknown identifier
+  computes one Argon2 hash, while an existing account with a wrong recovery code is only
+  compared with its stored code hashes (SHA-256), and a locked one is refused before that. So
+  there an unknown identifier answers noticeably slower than an existing account, although
+  both get the same `400`. What slows down a caller who probes identifiers that way is the
+  route's per-client budget (10 requests an hour, see
+  [Rate limits](#rate-limits-bucket-budgets)).
 - Responses use a single generic error (`"Invalid credentials."`, or equivalent) without
   leaking whether the identifier exists. A rejected sign-in answers
   `401 {"error": "Invalid credentials."}` for a wrong password, an unknown identifier and a

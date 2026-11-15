@@ -8,12 +8,13 @@ DB-free and run without Postgres.
 
 from __future__ import annotations
 
-import functools
+import asyncio
 import io
+import json
 import statistics
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -641,33 +642,133 @@ async def test_the_login_route_pads_only_rejected_sign_ins_to_the_floor(monkeypa
     assert malformed[1] < floor
 
 
+async def test_the_floor_counts_from_when_the_sign_in_has_been_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-136: a client that holds its body back does not use up the floor before its sign-in is checked.
+
+    The headers and the start of the body go out at once, the rest 400 ms later. The rejection
+    still waits the whole floor after the body has arrived, so the answer never shows the raw
+    time the rejection took, which differs between rejection paths.
+    """
+    monkeypatch.setattr(control_plane_api, "_auth_service", _StubLoginService)
+    floor = operator_auth_mod._FAILURE_TIMING_FLOOR_SECONDS
+    held_back = 0.4
+    body = json.dumps({"identifier": "nobody@example.com", "password": "wrong-password-XX"}).encode()
+
+    async def slow_body() -> AsyncIterator[bytes]:
+        yield body[:10]
+        await asyncio.sleep(held_back)
+        yield body[10:]
+
+    async with TestClient(TestServer(_login_app())) as client:
+        started = time.perf_counter()
+        response = await client.post(
+            "/api/control-plane/auth/login", data=slow_body(), headers={"Content-Type": "application/json"}
+        )
+        await response.read()
+        elapsed = time.perf_counter() - started
+
+    assert response.status == 401
+    assert elapsed >= held_back + floor, f"{elapsed * 1000:.1f} ms"
+
+
+class _SlowHasher:
+    """Stands in for the Argon2 hasher on a host so busy that one check outlasts the floor."""
+
+    def __init__(self, check_seconds: float) -> None:
+        self.check_seconds = check_seconds
+
+    def hash(self, password: str) -> str:
+        return "slow-hash"
+
+    def verify(self, password_hash: str, password: str) -> bool:
+        time.sleep(self.check_seconds)
+        raise VerifyMismatchError
+
+
+def _stand_in_operator_table(monkeypatch: pytest.MonkeyPatch, owner: dict[str, Any], write_seconds: float) -> list[Any]:
+    """Serve `owner` from a stand-in for cp_operator_users; every write blocks for `write_seconds`.
+
+    The owner's row never changes, so every wrong password for it takes the same path: check the
+    stored hash, then write the failure count. Returns the parameters of each write.
+    """
+    writes: list[Any] = []
+
+    def fetch_one(query: str, params: Any = ()) -> dict[str, Any] | None:
+        return owner if owner["username"] in params else None
+
+    def execute(query: str, params: Any = ()) -> int:
+        time.sleep(write_seconds)
+        writes.append(params)
+        return 1
+
+    monkeypatch.setattr(operator_auth_mod, "fetch_one", fetch_one)
+    monkeypatch.setattr(operator_auth_mod, "execute", execute)
+    monkeypatch.setattr(operator_auth_mod, "emit_security", lambda *args, **kwargs: None)
+    monkeypatch.setattr(control_plane_api, "_auth_service", operator_auth_mod.OperatorAuthService)
+    return writes
+
+
+async def test_a_rejection_that_outlasts_the_floor_waits_for_its_next_multiple(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-136: when the work itself takes longer than the floor, the extra failure-count write still does not show.
+
+    Each Argon2 check takes 250 ms against a 200 ms floor. An unknown identifier does one check
+    (250 ms); a wrong password for the owner does one check and writes its failure count
+    (290 ms). Both answer at the next multiple of the floor, 400 ms, so they still take the same
+    time.
+    """
+    floor = 0.2
+    monkeypatch.setattr(operator_auth_mod, "_FAILURE_TIMING_FLOOR_SECONDS", floor)
+    monkeypatch.setattr(operator_auth_mod, "_password_hasher", lambda: _SlowHasher(check_seconds=0.25))
+    operator_auth_mod._dummy_password_hash.cache_clear()
+    owner = {"id": "7", "username": "owner", "password_hash": "slow-hash"}
+    writes = _stand_in_operator_table(monkeypatch, owner, write_seconds=0.04)
+    durations: dict[str, list[float]] = {"owner": [], "nobody@example.com": []}
+
+    try:
+        async with TestClient(TestServer(_login_app())) as client:
+            for _ in range(3):
+                for identifier, measured in durations.items():
+                    status, elapsed = await _timed_login(client, identifier, "wrong-password-XX")
+                    assert status == 401
+                    measured.append(elapsed)
+    finally:
+        operator_auth_mod._dummy_password_hash.cache_clear()
+
+    assert len(writes) == 3
+    for identifier, measured in durations.items():
+        assert min(measured) >= 2 * floor, f"{identifier}: {[round(value * 1000) for value in measured]} ms"
+    known, unknown = (statistics.median(measured) for measured in durations.values())
+    assert abs(known - unknown) < 0.010, f"median owner {known * 1000:.1f} ms, unknown {unknown * 1000:.1f} ms"
+
+
 @pytest.mark.slow
-@pytest.mark.postgres
 async def test_failed_logins_take_the_floor_whether_or_not_the_identifier_exists(
-    operator_db: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """D-136, measured over HTTP: 1,000 failed sign-ins each for the owner and an unknown identifier.
 
     Every attempt takes at least the 300 ms floor, and the two medians differ by less than 10 ms.
-    The owner's lockout is put out of reach, so every owner attempt takes the wrong-password path:
-    the one that checks the stored Argon2 hash and writes the failure count.
+    The service and its Argon2 hashes are real; only cp_operator_users is stood in for, so the
+    test needs no Postgres and runs in the plain `pytest` gate. Every owner attempt is a wrong
+    password: it checks the stored hash and writes the failure count, a write the stand-in makes
+    take 15 ms, more than the medians may differ by. An unknown identifier checks the dummy hash
+    and writes nothing.
 
-    The test measures the floor, not this host's Argon2 speed, so it hashes with cheap Argon2
-    parameters (the owner's hash and the dummy alike). With the defaults, a check on a loaded CI
-    host can itself take longer than the floor, and the medians then differ by the failure-count
-    write (13 ms at a load of 12 on 4 cores).
+    Argon2 runs with cheap parameters so that the work stays inside the floor and the test
+    measures the floor itself: with the defaults one check on a loaded host takes longer than
+    300 ms (450 ms to 1.4 s on 4 cores at a load of 10). That case is
+    `test_a_rejection_that_outlasts_the_floor_waits_for_its_next_multiple`, and that every
+    rejection checks one hash, the dummy one included, is
+    `test_every_rejected_login_checks_one_password_hash`.
     """
-    floor = 0.3
-    cheap_hasher = functools.partial(PasswordHasher, time_cost=1, memory_cost=8192, parallelism=1)
-    monkeypatch.setattr(operator_auth_mod, "PasswordHasher", cheap_hasher)
-    operator_auth_mod._password_hasher.cache_clear()
+    floor = operator_auth_mod._FAILURE_TIMING_FLOOR_SECONDS
+    cheap_hasher = PasswordHasher(time_cost=1, memory_cost=8192, parallelism=1)
+    monkeypatch.setattr(operator_auth_mod, "_password_hasher", lambda: cheap_hasher)
     operator_auth_mod._dummy_password_hash.cache_clear()
-    service = operator_auth_mod.OperatorAuthService()
-    _create_owner(service)
-    monkeypatch.setattr(control_plane_api, "_auth_service", lambda: service)
-    monkeypatch.setattr(operator_auth_mod, "_FAILURE_TIMING_FLOOR_SECONDS", floor)
-    monkeypatch.setattr(operator_auth_mod, "CONTROL_PLANE_OPERATOR_LOGIN_MAX_FAILURES", 10**9)
+    owner = {"id": "7", "username": "owner", "password_hash": cheap_hasher.hash(STRONG_PASSWORD)}
+    writes = _stand_in_operator_table(monkeypatch, owner, write_seconds=0.015)
     durations: dict[str, list[float]] = {"owner": [], "nobody@example.com": []}
 
     try:
@@ -681,6 +782,7 @@ async def test_failed_logins_take_the_floor_whether_or_not_the_identifier_exists
     finally:
         operator_auth_mod._dummy_password_hash.cache_clear()
 
+    assert len(writes) == 1000
     known, unknown = (statistics.median(measured) for measured in durations.values())
     assert abs(known - unknown) < 0.010, f"median owner {known * 1000:.1f} ms, unknown {unknown * 1000:.1f} ms"
 
@@ -1369,15 +1471,26 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 @pytest.mark.parametrize(
     "path",
     [
-        _REPO_ROOT / "docs" / "security" / "authentication.md",
-        _REPO_ROOT / "docs" / "install" / "vps.md",
+        pytest.param(_REPO_ROOT / "docs" / "security" / "authentication.md", id="security/authentication.md"),
+        pytest.param(
+            _REPO_ROOT / "apps" / "web" / "CLAUDE.md",
+            id="web/CLAUDE.md",
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason=(
+                    "apps/web/CLAUDE.md still calls the timing floor pending (M1-E1-T13). Changing a CLAUDE.md "
+                    "needs the operator's approval; remove this mark with that edit."
+                ),
+            ),
+        ),
+        pytest.param(_REPO_ROOT / "docs" / "install" / "vps.md", id="install/vps.md"),
     ],
-    ids=lambda path: f"{path.parent.name}/{path.name}",
 )
 def test_docs_state_the_login_timing_floor(path: Path) -> None:
     """D-136: failed logins are padded to a 300 ms floor, and no doc still calls it pending.
 
     Only the login route is padded, so no doc may claim that every auth failure takes equal time.
+    The mandatory web guide is checked too; it fails until its stale sentence is corrected.
     """
     assert operator_auth_mod._FAILURE_TIMING_FLOOR_SECONDS == 0.3
     text = " ".join(path.read_text(encoding="utf-8").split())

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import math
 import re
 import secrets
 import time
@@ -49,7 +50,7 @@ from .settings import (
 
 _BOOTSTRAP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _BOOTSTRAP_INSERT_ATTEMPTS = 5
-# A rejected sign-in answers no sooner than this after the login route received it, so the
+# A rejected sign-in answers no sooner than this after the login route has read it, so the
 # response time does not tell which accounts exist (D-136). The route waits with `pad_failed_login`.
 _FAILURE_TIMING_FLOOR_SECONDS = 0.3
 _DISPLAY_NAME_MAX_LENGTH = 80
@@ -168,9 +169,16 @@ async def pad_failed_login(started: float) -> None:
     """Wait until ``_FAILURE_TIMING_FLOOR_SECONDS`` have passed since ``started`` (``time.monotonic()``).
 
     The login route awaits this before it answers a rejected sign-in, so every rejection takes
-    the same time and the event loop keeps serving other requests meanwhile.
+    the same time and the event loop keeps serving other requests meanwhile. When the sign-in's
+    own work already took longer than the floor (a host so busy that one Argon2 check outlasts
+    it), the wait runs to the next multiple of the floor instead. The failure-count write that
+    only a wrong password does then shows only when it pushes an answer past a multiple.
     """
-    while (remaining := _FAILURE_TIMING_FLOOR_SECONDS - (time.monotonic() - started)) > 0:
+    if _FAILURE_TIMING_FLOOR_SECONDS <= 0:
+        return
+    floors = max(1, math.ceil((time.monotonic() - started) / _FAILURE_TIMING_FLOOR_SECONDS))
+    deadline = started + floors * _FAILURE_TIMING_FLOOR_SECONDS
+    while (remaining := deadline - time.monotonic()) > 0:
         await asyncio.sleep(remaining)
 
 
