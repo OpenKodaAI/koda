@@ -29,9 +29,12 @@ from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+if TYPE_CHECKING:
+    from koda.squads import SquadTurnDispatchResult
 
 from koda.agent_contract import normalize_integration_grants
 from koda.config import (
@@ -7147,7 +7150,7 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
     squad_message_id: str | None,
     artifact_ids: list[str],
     swept_handoff_id: str | None = None,
-) -> None:
+) -> "SquadTurnDispatchResult | None":
     """Queue the coordinator synthesis once the cycle's tasks have ended, then record each handoff's outcome.
 
     The cycle's tasks are those whose ``coordination_parent_message_id`` is the turn's parent
@@ -7156,9 +7159,14 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
     With ``swept_handoff_id`` the squad router's sweep runs the check for that handoff: it queues
     nothing unless the handoff is open in the cycle it reads, and it adds no result for the swept
     task, whose turn did not run here.
+
+    A synthesis the room refuses (paused or spent) in a cycle with no handoff is recorded as a
+    ``synthesis_refused`` system event, and the squad router runs this check again once the room
+    can run (D-336); a handoff's own sweep retries the others. Returns the synthesis dispatch's
+    result, or None when none was dispatched.
     """
     if not ctx.squad_thread_id or not ctx.squad_task_id:
-        return
+        return None
     try:
         from koda.squads import (
             dispatch_squad_turn,
@@ -7173,13 +7181,13 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
         thread_store = get_squad_thread_store()
         task_store = get_squad_task_store()
         if thread_store is None or task_store is None:
-            return
+            return None
         thread = await thread_store.get_thread(ctx.squad_thread_id)
         if thread is None or not thread.coordinator_agent_id:
-            return
+            return None
         executing_agent = ctx.executing_agent_id or AGENT_ID or "default"
         if thread.coordinator_agent_id == executing_agent:
-            return
+            return None
         open_tasks = []
         for attempt in range(4):
             # This cycle's tasks only: an open task of an earlier cycle does not hold this one (D-287).
@@ -7196,7 +7204,7 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
         if open_tasks:
             readiness = evaluate_synthesis_readiness(tasks=open_tasks)
             synthesis_gate_metric(gate="coordinator_task_cycle", result=readiness)
-            return
+            return None
         synthesis_parent_id = ctx.parent_message_id
         synthesis_idempotency_key = (
             f"squad_synthesis:{ctx.squad_thread_id}:{synthesis_parent_id}:{thread.coordinator_agent_id}"
@@ -7222,7 +7230,7 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
                 raw_metadata = message.get("metadata")
                 metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
                 if metadata.get("idempotency_key") == synthesis_idempotency_key:
-                    return
+                    return None
                 if source_message_id is not None and message.get("id") == source_message_id:
                     # A reply obligation on the cycle's source message that a destination answered
                     # also counts as its reply to a handoff (D-074).
@@ -7274,9 +7282,9 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
         if handoff_events and handoff_ids <= closed_ids:
             # Every handoff of the cycle has its outcome, which is recorded only once the synthesis
             # is queued, so running the check again queues nothing.
-            return
+            return None
         if swept_handoff_id is not None and (swept_handoff_id not in handoff_ids or swept_handoff_id in closed_ids):
-            return
+            return None
         if swept_handoff_id is None and not any(
             ctx.squad_task_id and f"/ {ctx.squad_task_id}:" in item for item in visible_results
         ):
@@ -7301,7 +7309,7 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
         )
         synthesis_gate_metric(gate="coordinator_task_cycle", result=readiness)
         if not readiness.ready:
-            return
+            return None
         visible_results_block = "\n\n".join(visible_results)
         confirmed_results_block = "\n".join(confirmed_results) or "- Nenhum resultado textual confirmado."
         timeout_block = ""
@@ -7364,12 +7372,36 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
             bot_override=getattr(context, "bot", None),
         )
         if not result.dispatched:
+            if result.refused and not handoff_events:
+                # No sweep runs this check again for a cycle with no handoff, so the refusal is
+                # recorded, once per synthesis, and the squad router runs the synthesis, with the
+                # same idempotency key, once the room can run again (D-336).
+                with contextlib.suppress(Exception):
+                    await thread_store.post_thread_message(
+                        thread_id=ctx.squad_thread_id,
+                        from_agent="system",
+                        content=f"[synthesis_refused] coordinator synthesis waits for the room: {result.error}",
+                        message_type="system_event",
+                        metadata={
+                            "event_type": "synthesis_refused",
+                            "squad_task_id": ctx.squad_task_id,
+                            "executing_agent_id": executing_agent,
+                            "parent_message_id": ctx.parent_message_id,
+                            "squad_message_id": squad_message_id,
+                            "artifact_ids": list(artifact_ids),
+                            "synthesis_idempotency_key": synthesis_idempotency_key,
+                            "reason": result.error,
+                            "retry_status": "pending",
+                        },
+                        idempotency_key=f"synthesis_refused:{synthesis_idempotency_key}",
+                        dedupe=True,
+                    )
             log.warning(
                 "squad_coordinator_synthesis_not_dispatched",
                 thread_id=ctx.squad_thread_id,
                 squad_task_id=ctx.squad_task_id,
             )
-            return
+            return result
         # Record the outcome of each handoff whose destinations have all answered (D-074).
         handoff_outcomes = {
             ref.get("id"): ref.get("status")
@@ -7397,12 +7429,14 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
                 correlation_id=handoff.get("correlation_id"),
                 handoff_id=str(handoff_id),
             )
+        return result
     except Exception:
         log.exception(
             "squad_coordinator_synthesis_enqueue_failed",
             thread_id=ctx.squad_thread_id,
             squad_task_id=ctx.squad_task_id,
         )
+        return None
 
 
 async def _maybe_enqueue_squad_reply_synthesis(
@@ -7830,6 +7864,62 @@ async def complete_open_squad_handoff(*, thread_id: str, squad_task_id: str, han
         artifact_ids=[],
         swept_handoff_id=handoff_id,
     )
+
+
+async def retry_refused_squad_synthesis(
+    *,
+    thread_id: str,
+    squad_task_id: str,
+    executing_agent_id: str,
+    parent_message_id: str | None,
+    squad_message_id: str | None,
+    artifact_ids: list[str],
+) -> str:
+    """Run the coordinator synthesis check again for a synthesis the room refused (D-336).
+
+    The squad router's sweep calls this for a ``synthesis_refused`` event of a room that can run
+    again. The check runs as the follow-up of ``squad_task_id``, the turn whose synthesis was
+    refused, would, with the same synthesis idempotency key. Returns ``refused`` when the room
+    refused it again, so the sweep keeps it, and ``done`` otherwise.
+    """
+    if _shutting_down:
+        return "refused"
+    from types import SimpleNamespace
+
+    from koda.squads import get_squad_thread_store
+
+    thread_store = get_squad_thread_store()
+    if thread_store is None:
+        return "refused"
+    thread = await thread_store.get_thread(thread_id)
+    if thread is None:
+        return "done"
+    ctx = QueryContext(
+        provider="",
+        work_dir="",
+        model="",
+        session_id="",
+        provider_session_id=None,
+        system_prompt="",
+        agent_mode="",
+        permission_mode="",
+        max_turns=0,
+        executing_agent_id=executing_agent_id,
+        squad_thread_id=thread_id,
+        squad_task_id=squad_task_id,
+        parent_message_id=parent_message_id,
+        telegram_message_thread_id=thread.telegram_message_thread_id,
+    )
+    # No turn context: the dispatch uses this runtime's application and bot.
+    result = await _maybe_enqueue_squad_coordinator_synthesis(
+        user_id=int(thread.owner_user_id or 0),
+        context=cast(BotContext, SimpleNamespace(application=None, bot=None)),
+        ctx=ctx,
+        response_text="",
+        squad_message_id=squad_message_id,
+        artifact_ids=artifact_ids,
+    )
+    return "refused" if result is not None and result.refused else "done"
 
 
 async def redispatch_expired_squad_claim(*, task_id: str) -> str:

@@ -963,3 +963,89 @@ async def test_a_dependent_task_claimed_in_a_paused_room_is_dispatched_after_the
     assert "claim_refused" not in redispatched.metadata
     history = await threads.thread_history(thread_id=thread.id, limit=100)
     assert [row for row in history if (row.get("metadata") or {}).get("event_type") == "claim_expired"] == []
+
+
+class _DelegatePlanner:
+    async def plan(self, planner_input: CoordinationPlannerInput) -> CoordinationDecision:
+        return CoordinationDecision(
+            mode="delegate",
+            confidence=0.86,
+            reasoning_summary="FE builds it.",
+            tasks=[CoordinationTask(key="build", title="Build", agent_id="FE", kind="frontend", objective="Build it")],
+            selected_agents=["FE"],
+            final_response_strategy="coordinator_synthesis_after_all_task_results",
+        )
+
+
+def _refusing_dispatch() -> Callable[..., Awaitable[Any]]:
+    """As dispatch_squad_turn does: a room that cannot run now gets no turn, and the result is refused."""
+    from koda.squads import SquadTurnDispatchResult, squad_thread_turn_refusal
+
+    async def dispatch(**kwargs: Any) -> SquadTurnDispatchResult:
+        refusal = squad_thread_turn_refusal(kwargs["thread"])
+        return SquadTurnDispatchResult(
+            target_agent_id=kwargs["target_agent_id"],
+            transport="none" if refusal else "local_queue",
+            dispatched=refusal is None,
+            error=refusal,
+            refused=refusal is not None,
+        )
+
+    return dispatch
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_delegate_synthesis_refused_by_a_paused_room_runs_once_after_the_reopen(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    """A cycle with no handoff records its refused synthesis, and the router runs it once (D-336)."""
+    threads, tasks = stores
+    thread = await threads.create_thread(
+        workspace_id="acme",
+        squad_id="build",
+        title="room",
+        owner_user_id=42,
+        coordinator_agent_id="PM",
+        participants=[("PM", "coordinator"), ("FE", "worker")],
+    )
+    user_msg_id = await threads.post_thread_message(
+        thread_id=thread.id, from_agent="user:alice", content="Ship the page", message_type="user_input"
+    )
+    parent = f"msg-{user_msg_id}"
+    execution = await SquadCoordinatorEngine(
+        thread_store=threads, task_store=tasks, planner=_DelegatePlanner()
+    ).coordinate_user_input(
+        text="Ship the page",
+        thread=thread,
+        participants=await threads.list_participants(thread_id=thread.id),
+        coordinator_agent_id="PM",
+        capability_hints={},
+        semantic_result=_semantic_result(),
+        dispatch=AsyncMock(return_value=None),
+        parent_message_id=parent,
+    )
+    [fe_task_id] = execution.task_ids
+    assert _handoff_rows(await threads.thread_history(thread_id=thread.id, limit=100)) == []
+    turn_stubs.side_effect = _refusing_dispatch()
+
+    # The operator pauses the room while FE's turn runs; FE finishes, and its synthesis is refused.
+    await threads.update_thread_status(thread.id, "paused")
+    await _finish_turn(thread_id=thread.id, parent=parent, task_id=fe_task_id, agent_id="FE")
+    [refused] = _final_syntheses(turn_stubs)
+    assert refused["target_agent_id"] == "PM"
+
+    router = _router(threads, tasks)
+    await router.sweep_once()
+    assert len(_final_syntheses(turn_stubs)) == 1
+
+    await threads.update_thread_status(thread.id, "open")
+    await router.sweep_once()
+    await router.sweep_once()
+    syntheses = _final_syntheses(turn_stubs)
+    assert len(syntheses) == 2
+    rerun = syntheses[1]
+    assert rerun["target_agent_id"] == "PM"
+    assert rerun["metadata"]["idempotency_key"] == refused["metadata"]["idempotency_key"]
+    assert rerun["delegation_request_id"] == refused["delegation_request_id"]
+    assert "FE / " in rerun["query_text"]

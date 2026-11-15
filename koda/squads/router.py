@@ -65,6 +65,7 @@ class SweepReport:
     budget_alerts: int = 0
     budget_auto_pauses: int = 0
     open_handoffs_checked: int = 0
+    refused_syntheses_retried: int = 0
 
     @property
     def reverted_count(self) -> int:
@@ -210,6 +211,11 @@ class SquadRouter:
             open_handoffs = await self._sweep_open_handoffs()
         except Exception:
             log.exception("squad_router_open_handoff_sweep_failed")
+        refused_syntheses = 0
+        try:
+            refused_syntheses = await self._sweep_refused_syntheses()
+        except Exception:
+            log.exception("squad_router_refused_synthesis_sweep_failed")
         return SweepReport(
             expired_claims=expired,
             auto_elections=elections,
@@ -219,6 +225,7 @@ class SquadRouter:
             budget_alerts=budget_alerts,
             budget_auto_pauses=budget_pauses,
             open_handoffs_checked=open_handoffs,
+            refused_syntheses_retried=refused_syntheses,
         )
 
     async def _sweep_auto_elections(self) -> list[AutoElection]:
@@ -569,6 +576,75 @@ class SquadRouter:
                 )
                 checked += 1
         return checked
+
+    async def _sweep_refused_syntheses(self) -> int:
+        """Run each coordinator synthesis a room refused again once the room can run (D-336).
+
+        A cycle with no handoff records its refused synthesis as a ``synthesis_refused`` system
+        event with ``retry_status`` ``pending``. For each one in a room that is open and under its
+        cap, a runtime takes it (``running``) with one conditional UPDATE, so two runtimes do not
+        run it both, and runs the synthesis check again. A synthesis refused again is ``pending``
+        until the room can run again; otherwise it is ``done``, so it runs at most once.
+        Returns the number of syntheses run again.
+        """
+        if self._thread_store is None:
+            return 0
+        pool = await self._thread_store._ensure_pool()  # noqa: SLF001
+        schema = self._thread_store._schema  # noqa: SLF001
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""SELECT m.id, m.thread_id, m.metadata_json
+                      FROM "{schema}"."squad_messages" AS m
+                      JOIN "{schema}"."squad_threads" AS th ON th.id = m.thread_id
+                     WHERE m.message_type = 'system_event'
+                       AND m.metadata_json->>'event_type' = 'synthesis_refused'
+                       AND m.metadata_json->>'retry_status' = 'pending'
+                       AND th.status = 'open'
+                       AND (th.budget_usd_cap IS NULL
+                            OR th.budget_usd_cap <= 0
+                            OR th.cost_usd_accum < th.budget_usd_cap)
+                  ORDER BY m.id ASC
+                     LIMIT $1""",
+                self._batch_size,
+            )
+        from koda.services.queue_manager import retry_refused_squad_synthesis
+
+        retried = 0
+        for row in rows:
+            async with pool.acquire() as conn:
+                taken = await conn.execute(
+                    f"""UPDATE "{schema}"."squad_messages"
+                           SET metadata_json = metadata_json || '{{"retry_status": "running"}}'::jsonb
+                         WHERE id = $1
+                           AND metadata_json->>'retry_status' = 'pending'""",
+                    int(row["id"]),
+                )
+            if taken != "UPDATE 1":
+                # Another runtime runs it.
+                continue
+            metadata = _decode_json_object(row["metadata_json"])
+            outcome = "done"
+            try:
+                outcome = await retry_refused_squad_synthesis(
+                    thread_id=str(row["thread_id"]),
+                    squad_task_id=str(metadata.get("squad_task_id") or ""),
+                    executing_agent_id=str(metadata.get("executing_agent_id") or ""),
+                    parent_message_id=str(metadata.get("parent_message_id") or "") or None,
+                    squad_message_id=str(metadata.get("squad_message_id") or "") or None,
+                    artifact_ids=[str(item) for item in metadata.get("artifact_ids") or []],
+                )
+            except Exception:
+                log.exception("squad_router_refused_synthesis_retry_failed", thread_id=str(row["thread_id"]))
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    f"""UPDATE "{schema}"."squad_messages"
+                           SET metadata_json = metadata_json || jsonb_build_object('retry_status', $2::text)
+                         WHERE id = $1""",
+                    int(row["id"]),
+                    "pending" if outcome == "refused" else "done",
+                )
+            retried += 1
+        return retried
 
     async def _emit_system_event(
         self,

@@ -111,7 +111,11 @@ Before broad rollout, run these in canary:
   under its cap dispatches the task again, without waiting for
   `SQUAD_CLAIM_TTL_S` and without a `claim_expired` event. A
   later claim of the task is a live one again: it is renewed, and its expiry
-  counts.
+  counts. A coordinator synthesis the room refuses in a cycle with no handoff
+  is recorded as one `synthesis_refused` system event, and the first router
+  sweep after the room can run again runs it, with the same idempotency key,
+  at most once; a handoff cycle's synthesis is retried by the open-handoff
+  sweep.
   A dashboard post or Telegram topic message to such a thread is not routed;
   the sender is told why. A dashboard room update may set only `photo_url` in
   `metadata`; keys the server keeps, such as the budget flags, are refused.
