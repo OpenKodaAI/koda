@@ -1,10 +1,9 @@
 """Smoke test for the real-Postgres fixture chain.
 
-The ``@pytest.mark.postgres`` tests below auto-skip when no DSN is
-configured and testcontainers/Docker is unavailable. CI runners that
-ship a Postgres service satisfy ``POSTGRES_TEST_DSN``; dev hosts with
-Docker daemon running auto-spin a pgvector container; everyone else
-sees a deterministic skip without surprises.
+The ``@pytest.mark.postgres`` tests below auto-skip when
+``POSTGRES_TEST_DSN`` is not set. CI runners that ship a Postgres
+service set it; everyone else sees a deterministic skip without
+surprises.
 
 The plain (non-marked) tests below verify the auto-skip mechanism
 itself — those run on every host so a future regression to the skip
@@ -14,7 +13,6 @@ logic is caught immediately.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import patch
 
 import pytest
 
@@ -29,22 +27,6 @@ def test_explicit_dsn_helper_returns_env_value(monkeypatch: pytest.MonkeyPatch) 
 def test_explicit_dsn_helper_returns_none_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("POSTGRES_TEST_DSN", raising=False)
     assert postgres_fixtures._explicit_dsn() is None
-
-
-def test_testcontainers_available_returns_false_when_lib_missing() -> None:
-    """Force the import to fail and assert the helper degrades to
-    False rather than raising."""
-    import builtins
-
-    real_import = builtins.__import__
-
-    def _block_testcontainers(name: str, *args, **kwargs):
-        if name.startswith("testcontainers"):
-            raise ImportError("simulated missing dep")
-        return real_import(name, *args, **kwargs)
-
-    with patch.object(builtins, "__import__", _block_testcontainers):
-        assert postgres_fixtures._testcontainers_available() is False
 
 
 def test_stop_primary_bridge_stops_the_bridge_thread_and_forgets_it() -> None:
@@ -77,8 +59,8 @@ def test_postgres_marker_is_registered() -> None:
 
 @pytest.mark.postgres
 def test_postgres_url_resolves_to_a_dsn(postgres_url: str) -> None:
-    """When the fixture is satisfied (env DSN OR Docker+
-    testcontainers), it must yield a non-empty DSN string."""
+    """When the fixture is satisfied (``POSTGRES_TEST_DSN``), it
+    must yield a non-empty DSN string."""
     assert isinstance(postgres_url, str)
     assert postgres_url.startswith("postgresql://")
 
@@ -177,9 +159,7 @@ def test_collection_hook_skips_postgres_when_unavailable(pytestconfig) -> None:
     must add a skip marker to every postgres-tagged test when the
     fixture cannot be satisfied. This protects contributors without
     Docker from spurious failures."""
-    has_dsn = postgres_fixtures._explicit_dsn() is not None
-    has_tc = postgres_fixtures._testcontainers_available()
-    if has_dsn or has_tc:
+    if postgres_fixtures._explicit_dsn() is not None:
         pytest.skip("Postgres fixture is available — collection hook is a no-op here.")
 
     class _FakeItem:

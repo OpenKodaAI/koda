@@ -91,23 +91,16 @@ include = ["koda*"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-v --tb=short"
+# pytest 9 form of --strict-markers (which it ignores in addopts): an unknown marker fails collection.
+strict_markers = true
 filterwarnings = []
 markers = [
     "real_policy_gate: run dispatcher tests against the real central execution-policy gate",
     "real_cli_contract_probe: run the real provider CLI contract probe (against fake CLI output)",
-    "postgres: requires a real Postgres instance (testcontainers or POSTGRES_TEST_DSN env)",
-    "mcp: spawns a real MCP server subprocess (npx postgres_mcp etc.)",
+    "postgres: requires a real Postgres instance (POSTGRES_TEST_DSN env)",
     "rust_engine: spawns a real Rust gRPC engine binary",
-    "s3: requires moto S3 fixture",
-    "golden: golden-dataset quality test (recall@K, extraction, dossier)",
-    "bench: performance/throughput benchmark; opt-in only",
     "chaos: failure injection / fault-tolerance test",
-    "eval: multi-provider evaluation (tools quality, etc.)",
-    "audio_fixtures: requires audio fixtures and ffmpeg",
-    "acoustic: real Kokoro+Whisper acoustic round-trip (gated by KODA_TEST_ACOUSTIC=1)",
     "slow: long-running test (>60s); nothing deselects it, so it runs in every full python-tests job (plain pytest)",
-    "local_only: only runs on developer machines; skipped in CI",
-    "flags: parametrized over feature flags",
     "security: adversarial guardrail and permission-boundary tests",
     "guardrail: focused tests for security blocking/approval behavior",
 ]

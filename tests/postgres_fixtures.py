@@ -1,18 +1,10 @@
 """Real-Postgres fixtures for tests marked ``@pytest.mark.postgres``.
 
-Resolution order (cheapest first):
-
-1. ``POSTGRES_TEST_DSN`` env var — CI workflows provision an
-   ephemeral Postgres service and inject the DSN. Tests run
-   immediately, no Docker needed in the runner.
-
-2. ``testcontainers`` library + Docker daemon — local dev. The
-   fixture spins ``pgvector/pgvector:pg16`` once per session and
-   shuts it down at exit.
-
-3. Otherwise — ``pytest.skip`` on every postgres-marked test. A
-   contributor without Docker can still run the rest of the suite
-   without surprises.
+The database comes from the ``POSTGRES_TEST_DSN`` env var: CI
+workflows provision an ephemeral Postgres service and inject the
+DSN, and a contributor points it at a local Postgres. Without it,
+every postgres-marked test is skipped, so the rest of the suite
+still runs.
 
 Migrations apply via the production code path
 (``KnowledgeV2PostgresBackend.bootstrap``) so the fixture verifies
@@ -45,44 +37,13 @@ def _explicit_dsn() -> str | None:
     return raw or None
 
 
-def _testcontainers_available() -> bool:
-    try:
-        import testcontainers.postgres  # type: ignore[import-not-found]  # noqa: F401
-    except Exception:
-        return False
-    # Docker daemon reachable?
-    try:
-        import docker  # type: ignore[import-not-found]
-
-        docker.from_env().ping()
-    except Exception:
-        return False
-    return True
-
-
 @pytest.fixture(scope="session")
 def postgres_url() -> str:
-    """Session-scoped DSN. Uses the env override when present;
-    otherwise spins testcontainers; otherwise skips the test."""
+    """Session-scoped DSN from ``POSTGRES_TEST_DSN``; skips the test without it."""
     explicit = _explicit_dsn()
-    if explicit:
-        yield explicit
-        return
-
-    if not _testcontainers_available():
-        pytest.skip("postgres fixture requires POSTGRES_TEST_DSN env or testcontainers + Docker")
-
-    from testcontainers.postgres import PostgresContainer  # type: ignore[import-not-found]
-
-    container = PostgresContainer("pgvector/pgvector:pg16", driver=None)
-    container.start()
-    try:
-        # testcontainers' default DSN uses ``postgresql+psycopg2``;
-        # asyncpg expects ``postgresql://``. Normalize.
-        url = container.get_connection_url().replace("postgresql+psycopg2", "postgresql")
-        yield url
-    finally:
-        container.stop()
+    if not explicit:
+        pytest.skip("postgres fixture requires the POSTGRES_TEST_DSN env var")
+    return explicit
 
 
 _DSN_ATTR = "KNOWLEDGE_V2_POSTGRES_DSN"
@@ -269,12 +230,11 @@ async def db_connection(migrated_postgres: str) -> AsyncIterator[Any]:
 
 def pytest_collection_modifyitems(config: Any, items: list[Any]) -> None:
     """Auto-skip ``@pytest.mark.postgres`` tests when no DSN is
-    available and testcontainers is missing — the fixture would
-    skip anyway, but the marker hook gives a single canonical
-    reason in the report."""
-    if _explicit_dsn() or _testcontainers_available():
+    available — the fixture would skip anyway, but the marker hook
+    gives a single canonical reason in the report."""
+    if _explicit_dsn():
         return
-    skip_marker = pytest.mark.skip(reason="postgres fixture unavailable (no DSN, no testcontainers/Docker)")
+    skip_marker = pytest.mark.skip(reason="postgres fixture unavailable (no POSTGRES_TEST_DSN)")
     for item in items:
         if _is_postgres_test(item):
             item.add_marker(skip_marker)

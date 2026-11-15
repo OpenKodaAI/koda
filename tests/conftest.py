@@ -1,6 +1,9 @@
 """Shared test fixtures."""
 
+import atexit
 import os
+import shutil
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -12,10 +15,9 @@ from tests import _security_guard
 # Pull in real-Postgres fixtures so any test marked
 # ``@pytest.mark.postgres`` resolves the ``postgres_url`` /
 # ``db_connection`` fixtures. The module also auto-skips marked
-# tests when no DSN is configured and testcontainers/Docker is
-# unreachable, so a contributor without Docker still gets a clean
-# pytest run.
-pytest_plugins = ["tests.postgres_fixtures", "tests._provider_plugin"]
+# tests when POSTGRES_TEST_DSN is not set, so a contributor without
+# Postgres still gets a clean pytest run.
+pytest_plugins = ["tests.postgres_fixtures"]
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
@@ -35,6 +37,47 @@ _GUARD = None if _security_guard.guard_disabled() else _security_guard.select_gu
 
 
 _REAL_HOME = os.path.expanduser("~")
+# Koda keeps its state in STATE_ROOT_DIR, ~/.koda-state by default, and modules read it at
+# import, before any per-test fixture runs. Point it at this session's own directory here so
+# no test writes into the real one or shares it with a run in another checkout (D-265);
+# session_state_root owns the directory and checks the run left the real one alone.
+_REAL_STATE_ROOT = Path(_REAL_HOME) / ".koda-state"
+_SESSION_STATE_ROOT = Path(tempfile.mkdtemp(prefix="koda-test-state-"))
+atexit.register(shutil.rmtree, _SESSION_STATE_ROOT, True)
+os.environ["STATE_ROOT_DIR"] = str(_SESSION_STATE_ROOT)
+os.environ.pop(f"{os.environ['AGENT_ID']}_STATE_ROOT_DIR", None)
+
+
+def _koda_paths_under(root: Path) -> list[str]:
+    """Return the module-level path settings (UPPER_CASE names) of loaded koda modules inside ``root``.
+
+    This does not watch the filesystem. It inspects only UPPER_CASE module attributes as they stand
+    when called, so it cannot see lowercase or instance-held paths (a store object holding a path,
+    ``_state_dir = Path.home() / ".koda-state"``), paths patched only for the length of one test,
+    or writes made by subprocesses. A check of the real directory itself would race with other
+    checkouts that still write there.
+    """
+    found = []
+    for name, module in list(sys.modules.items()):
+        if module is None or not (name == "koda" or name.startswith("koda.")):
+            continue
+        for attr, value in list(vars(module).items()):
+            if not attr.lstrip("_").isupper() or not isinstance(value, Path | str) or not os.path.isabs(value):
+                continue
+            if Path(value).is_relative_to(root):
+                found.append(f"{name}.{attr} = {value}")
+    return found
+
+
+@pytest.fixture(scope="session", autouse=True)
+def session_state_root():
+    """This session's STATE_ROOT_DIR; fails the run if a loaded module points into the real one.
+
+    The end-of-session check has the blind spots listed on :func:`_koda_paths_under`.
+    """
+    yield _SESSION_STATE_ROOT
+    leaked = _koda_paths_under(_REAL_STATE_ROOT)
+    assert not leaked, f"Koda paths under the real state dir {_REAL_STATE_ROOT}: {leaked}"
 
 
 @pytest.fixture(autouse=True)
@@ -224,9 +267,13 @@ def approved_context(mock_context):
     return mock_context
 
 
-@pytest.fixture(autouse=True)
-def _auto_approve_execution():
-    """Auto-set the execution_approved contextvar for all tests."""
+@pytest.fixture
+def execution_approved():
+    """Run the test inside an approved execution context, as ``with_approval`` and scheduled jobs do.
+
+    Opt-in only: the queue worker never sets this contextvar (D-011), so setting it for every
+    test hid that bug. Use it only for tests that model an approved context.
+    """
     from koda.utils.approval import _execution_approved
 
     token = _execution_approved.set(True)

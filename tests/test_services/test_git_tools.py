@@ -552,6 +552,7 @@ class TestGitToolsAgainstRealGit:
         assert not result.success
         assert (git_repo / "a.txt").read_text(encoding="utf-8") == "uncommitted work\n"
 
+    @pytest.mark.usefixtures("execution_approved")
     @pytest.mark.asyncio
     async def test_normal_calls_succeed(self, git_repo: Path):
         ctx = _make_ctx(work_dir=str(git_repo))

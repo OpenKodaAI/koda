@@ -200,6 +200,7 @@ async def _finish(mgr, handle_id):
     return bg
 
 
+@pytest.mark.usefixtures("execution_approved")
 class TestBackgroundProcessManagerKernelPath:
     """shell_bg runs through the runtime-kernel ExecuteCommand path (M1-E4-T10)."""
 
@@ -425,6 +426,7 @@ class _KernelTimingStub:
         )
 
 
+@pytest.mark.usefixtures("execution_approved")
 class TestBackgroundTimeoutsThroughRuntimeKernelClient:
     """shell_bg and shell_execute timeouts through the real gRPC client and its circuit breaker."""
 

@@ -8,7 +8,7 @@ test_runtime_postgres_isolation.py:
   * add_browser_session / update_browser_session / list_browser_sessions
   * add_recovery_action
 
-All against the real testcontainers Postgres + JSONB codec from the
+All against the real POSTGRES_TEST_DSN Postgres + JSONB codec from the
 shared fixture pattern.
 """
 

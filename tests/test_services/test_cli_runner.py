@@ -35,6 +35,7 @@ async def test_blocked_pattern():
     assert "Blocked" in result
 
 
+@pytest.mark.usefixtures("execution_approved")
 @pytest.mark.parametrize("binary", ["gws", "gh", "glab", "aws", "jira", "gcloud", "gsutil"])
 @pytest.mark.asyncio
 async def test_external_cli_binary_can_run_informally_when_available(binary: str):
@@ -50,6 +51,7 @@ async def test_external_cli_binary_can_run_informally_when_available(binary: str
     assert "Exit 0" in result
 
 
+@pytest.mark.usefixtures("execution_approved")
 @pytest.mark.asyncio
 async def test_external_npx_package_can_run_informally_when_available():
     mock_proc = AsyncMock()
@@ -70,6 +72,7 @@ async def test_allowed_cmds_rejected():
     assert "not allowed" in result.lower()
 
 
+@pytest.mark.usefixtures("execution_approved")
 @pytest.mark.asyncio
 async def test_allowed_cmds_accepted():
     mock_proc = AsyncMock()
@@ -84,6 +87,7 @@ async def test_allowed_cmds_accepted():
         assert "Exit 0" in result
 
 
+@pytest.mark.usefixtures("execution_approved")
 @pytest.mark.asyncio
 async def test_env_passthrough():
     mock_proc = AsyncMock()
@@ -99,6 +103,7 @@ async def test_env_passthrough():
         assert passed_env["LOCAL_FLAG"] == "enabled"
 
 
+@pytest.mark.usefixtures("execution_approved")
 @pytest.mark.asyncio
 async def test_tool_cli_environment_strips_ambient_secrets(monkeypatch):
     monkeypatch.setenv("AGENT_TOKEN", "telegram-secret")
@@ -120,6 +125,7 @@ async def test_tool_cli_environment_strips_ambient_secrets(monkeypatch):
     assert "ANTHROPIC_API_KEY" not in passed_env
 
 
+@pytest.mark.usefixtures("execution_approved")
 @pytest.mark.asyncio
 async def test_normal_execution():
     mock_proc = AsyncMock()
@@ -135,6 +141,7 @@ async def test_normal_execution():
         assert "result" in result
 
 
+@pytest.mark.usefixtures("execution_approved")
 @pytest.mark.asyncio
 async def test_timeout_handling():
     mock_proc = AsyncMock()
