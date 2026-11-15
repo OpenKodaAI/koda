@@ -372,12 +372,6 @@ class RuntimeController:
         else:
             event.set()
 
-    def _has_alive_recorded_processes(self, *, task_id: int, env_id: int) -> bool:
-        return any(
-            str(process_row.get("status") or "") != "exited"
-            for process_row in self.store.list_processes(task_id, env_id=env_id)
-        )
-
     def get_runtime_kernel_health(self) -> dict[str, Any]:
         """Return a normalized kernel health payload for the gRPC migration seam."""
         raw = cast(dict[str, Any], self.runtime_kernel.health() or {})
