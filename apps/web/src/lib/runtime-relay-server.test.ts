@@ -8,6 +8,7 @@ import { Duplex } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { createDashboardServer } from "./dashboard-server.mjs";
+import { isTrustedDashboardRequest } from "./request-origin";
 import { createRuntimeRelayDescriptor, getRuntimeRelayPath } from "./runtime-relay";
 import {
   RELAY_CLIENT_MAX_PAYLOAD_BYTES,
@@ -366,6 +367,27 @@ describe("runtime relay upgrade", () => {
         const response = await rawUpgrade(port, relayPath, [`Cookie: ${sessionCookie(TOKEN)}`], { origin });
         expect(response.status, `${relayPath} ${origin}`).toBe(403);
         expect(response.head).not.toMatch(/sec-websocket-accept/i);
+        await waitForClose(response.socket);
+      }
+    }
+    expect(upstream.connections).toBe(0);
+  });
+
+  it("takes only the Origin: not the Referer or Sec-Fetch-Site that request-origin.ts also admits", async () => {
+    const { upstream, port, path } = await authorizedRelay();
+    const fallbacks = [`Referer: ${DASHBOARD_ORIGIN}/sessions`, "Sec-Fetch-Site: same-origin"];
+
+    for (const origin of [null, "http://127.0.0.1:8080"]) {
+      for (const fallback of fallbacks) {
+        const [name, value] = fallback.split(": ");
+        // The dashboard's other routes admit such a change (request-origin.ts).
+        const headers = new Headers({ host: DASHBOARD_HOST, [name]: value });
+        if (origin !== null) headers.set("origin", origin);
+        const change = { method: "POST", headers };
+        expect(isTrustedDashboardRequest(change), `${origin} ${fallback}`).toBe(true);
+
+        const response = await rawUpgrade(port, path, [`Cookie: ${sessionCookie(TOKEN)}`, fallback], { origin });
+        expect(response.status, `${origin} ${fallback}`).toBe(403);
         await waitForClose(response.socket);
       }
     }

@@ -113,12 +113,12 @@ function tokenMatches(descriptor, token) {
 }
 
 /**
- * The origin of a dashboard page served at the request's target, by the rule
- * request-origin.ts applies to the dashboard's other routes: the scheme in the
- * first `X-Forwarded-Proto` entry, which a TLS-terminating proxy sends
- * (docs/install/vps.md), or http, the scheme this server listens on; then the
- * Host header. ws and wss stand for http and https: Traefik sends them for a
- * WebSocket.
+ * The origin of a dashboard page served at the request's target, built from
+ * the same headers request-origin.ts reads for the dashboard's other routes:
+ * the scheme in the first `X-Forwarded-Proto` entry, which a TLS-terminating
+ * proxy sends (docs/install/vps.md), or http, the scheme this server listens
+ * on; then the Host header. ws and wss stand for http and https: Traefik sends
+ * them for a WebSocket.
  * @param {import("node:http").IncomingMessage} request
  * @returns {string | null}
  */
@@ -136,7 +136,9 @@ function dashboardOrigin(request) {
  * origin with every WebSocket handshake, and a page cannot change it. The
  * session cookie is SameSite=Strict, so a browser still attaches it for a page
  * on another origin of the same site (another port on the same host, a sibling
- * subdomain): this check refuses that page.
+ * subdomain): this check refuses that page. It is stricter than request-origin.ts,
+ * which also admits a matching Referer or `Sec-Fetch-Site: same-origin` when the
+ * Origin does not match: only a matching Origin admits an upgrade.
  * @param {import("node:http").IncomingMessage} request
  * @returns {boolean}
  */

@@ -9,8 +9,10 @@ Proxy") and each one tells the two upstreams apart, so a request that reaches th
   a session with its own 401, registers the owner with the bootstrap code and signs in through the
   proxy (a session cookie, never the API's bearer token), and then serves a cookie-authenticated
   ``/api/control-plane/*`` call;
-- runtime relay: a WebSocket handshake on ``/api/runtime/relay/<id>`` gets ``101`` and the relay's
-  own close code ``4404 relay_not_found``, so the upgrade reached the dashboard's ``server.mjs``;
+- runtime relay: a WebSocket upgrade on ``/api/runtime/relay/<id>`` for an unknown relay id gets the
+  relay's empty ``404`` with the page's Origin and its empty ``403`` with a foreign Origin, both
+  before any handshake (``apps/web/src/lib/runtime-relay-server.mjs``); nginx and the API never
+  answer 403 there, so the pair shows the upgrade reached the dashboard's ``server.mjs``;
 - API-token path: ``Authorization: Bearer`` calls reach the API, a GET and a POST whose body the API
   must read (``auth/login`` answers with a ``session_token`` only there), and the API serves
   ``/openapi/control-plane.json``;
@@ -32,7 +34,6 @@ from __future__ import annotations
 import argparse
 import base64
 import contextlib
-import hashlib
 import http.client
 import io
 import json
@@ -55,8 +56,13 @@ TEMPLATE_API = "http://127.0.0.1:8090"
 
 SESSION_COOKIE = "koda_operator_session"
 DASHBOARD_NO_SESSION = "Operator session is required."
-RELAY_NOT_FOUND = (4404, "relay_not_found")
-WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+# apps/web/src/lib/runtime-relay-server.mjs refuses a relay upgrade before the WebSocket handshake
+# with an empty answer: 403 unless the Origin is the page's (X-Forwarded-Proto and Host), then 404
+# for an unknown relay id. Only the dashboard answers 403 there; nginx and the API never do.
+RELAY_PATH_PREFIX = "/api/runtime/relay/"
+RELAY_UNKNOWN_ID_STATUS = 404
+RELAY_FOREIGN_ORIGIN_STATUS = 403
+FOREIGN_ORIGIN = "http://evil.example"
 TIMEOUT_SECONDS = 15.0
 
 PROFILE_PHOTO_PATH = "/api/control-plane/auth/profile/photo"
@@ -194,71 +200,17 @@ class Proxy:
             raise CheckFailed(f"not an HTTP response: {status_line[:120]!r}")
         return Response(int(parts[1]), http.client.parse_headers(io.BytesIO(fields + b"\r\n\r\n")), body)
 
-    def websocket_close(self, path: str) -> tuple[int, str]:
-        """Open a WebSocket on *path* and return the close code and reason of the first frame the server sends."""
-        key = base64.b64encode(os.urandom(16)).decode("ascii")
-        handshake = (
-            f"GET {path} HTTP/1.1\r\n"
-            f"Host: {self.netloc}\r\n"
-            "Upgrade: websocket\r\n"
-            "Connection: Upgrade\r\n"
-            f"Sec-WebSocket-Key: {key}\r\n"
-            "Sec-WebSocket-Version: 13\r\n"
-            f"Origin: {self.origin}\r\n"
-            "\r\n"
-        )
-        with socket.create_connection((self.host, self.port), timeout=self.timeout) as sock:
-            sock.sendall(handshake.encode("ascii"))
-            buffer = b""
-            while b"\r\n\r\n" not in buffer:
-                chunk = sock.recv(4096)
-                if not chunk:
-                    raise CheckFailed(f"connection closed during the handshake: {buffer[:120]!r}")
-                buffer += chunk
-            head, _, buffer = buffer.partition(b"\r\n\r\n")
-            lines = head.decode("latin-1").split("\r\n")
-            status = lines[0].split(" ", 2)
-            if len(status) < 2 or status[1] != "101":
-                raise CheckFailed(f"expected 101 Switching Protocols, got {lines[0]!r}")
-            fields = {
-                name.strip().lower(): value.strip() for name, _, value in (line.partition(":") for line in lines[1:])
-            }
-            accept = base64.b64encode(hashlib.sha1((key + WEBSOCKET_GUID).encode("ascii")).digest()).decode("ascii")
-            if fields.get("upgrade", "").lower() != "websocket" or fields.get("sec-websocket-accept") != accept:
-                raise CheckFailed(f"the 101 is not a WebSocket handshake answer: {fields}")
-
-            def read(count: int) -> bytes:
-                nonlocal buffer
-                while len(buffer) < count:
-                    chunk = sock.recv(4096)
-                    if not chunk:
-                        raise CheckFailed("connection closed before a close frame arrived")
-                    buffer += chunk
-                taken, buffer = buffer[:count], buffer[count:]
-                return taken
-
-            first, second = read(2)
-            opcode, length = first & 0x0F, second & 0x7F
-            if second & 0x80:
-                raise CheckFailed("the server sent a masked frame")
-            if length == 126:
-                length = int.from_bytes(read(2), "big")
-            elif length == 127:
-                length = int.from_bytes(read(8), "big")
-            payload = read(length)
-            if opcode != 0x8:
-                raise CheckFailed(f"expected a close frame first, got opcode {opcode:#x}")
-            code = int.from_bytes(payload[:2], "big") if len(payload) >= 2 else 1005
-            reason = payload[2:].decode("utf-8", "replace")
-            # Answer the close (client frames are masked) so the server sees a clean shutdown; it may
-            # already have dropped the connection, which changes nothing about the answer.
-            mask = os.urandom(4)
-            reply = code.to_bytes(2, "big") if len(payload) >= 2 else b""
-            with contextlib.suppress(OSError):
-                sock.sendall(
-                    bytes([0x88, 0x80 | len(reply)]) + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(reply))
-                )
-            return code, reason
+    def websocket_upgrade(self, path: str, *, origin: str) -> Response:
+        """Send a WebSocket upgrade for *path* from a page on *origin* and return the answer, whatever its status."""
+        headers = {
+            "Upgrade": "websocket",
+            "Connection": "Upgrade",
+            "Sec-WebSocket-Key": base64.b64encode(os.urandom(16)).decode("ascii"),
+            "Sec-WebSocket-Version": "13",
+            "Origin": origin,
+        }
+        # http.client reads no body after a 101, so this returns at once even if a server accepts it.
+        return self.request("GET", path, headers=headers)
 
 
 # ---------------------------------------------------------------------------
@@ -357,9 +309,20 @@ def _browser_call_with_session(proxy: Proxy, session: Session) -> str:
 
 
 def _relay_websocket(proxy: Proxy) -> str:
-    code, reason = proxy.websocket_close(f"/api/runtime/relay/proxy-smoke-{secrets.token_hex(8)}")
-    _expect((code, reason) == RELAY_NOT_FOUND, f"expected close {RELAY_NOT_FOUND}, got ({code}, {reason!r})")
-    return f"101, then close {code} {reason}"
+    path = f"{RELAY_PATH_PREFIX}proxy-smoke-{secrets.token_hex(8)}"
+    for origin, status in ((proxy.origin, RELAY_UNKNOWN_ID_STATUS), (FOREIGN_ORIGIN, RELAY_FOREIGN_ORIGIN_STATUS)):
+        response = proxy.websocket_upgrade(path, origin=origin)
+        length = response.headers.get("Content-Length")
+        accept = response.headers.get("Sec-WebSocket-Accept")
+        _expect(
+            response.status == status and length == "0" and not response.body and accept is None,
+            f"expected the relay's empty {status} for Origin {origin}, got {response.summary()}"
+            f" with Content-Length {length!r} and {'a' if accept else 'no'} Sec-WebSocket-Accept",
+        )
+    return (
+        f"{RELAY_UNKNOWN_ID_STATUS} for an unknown relay id, {RELAY_FOREIGN_ORIGIN_STATUS} for a foreign Origin,"
+        " both empty and before the handshake"
+    )
 
 
 def _api_token_get(proxy: Proxy, api_token: str) -> str:
