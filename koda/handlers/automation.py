@@ -1,4 +1,4 @@
-"""Automation command handlers: /cron, /search, /fetch, /http, /curl."""
+"""Automation command handlers: /cron, /search, /fetch, /http, /curl (an alias of /fetch)."""
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -222,17 +222,5 @@ async def cmd_http(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await send_long_message(update, f"```\n{result}\n```")
 
 
-@authorized
-@with_approval("curl")
-async def cmd_curl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Simplified curl: /curl <url>."""
-    url = " ".join(context.args) if context.args else ""
-    if not url:
-        await update.message.reply_text("Usage: /curl <url>")
-        return
-
-    if not url.startswith(("http://", "https://")):
-        url = "https://" + url
-
-    result = await fetch_url(url)
-    await send_long_message(update, f"```\n{result}\n```")
+# /curl is an alias of /fetch (M6-E3-T4): the same handler, approval and output.
+cmd_curl = cmd_fetch

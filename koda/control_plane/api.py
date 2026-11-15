@@ -2909,7 +2909,7 @@ async def list_agent_tools_catalog_route(request: web.Request) -> web.Response: 
         "ls": "List a directory",
         "search": "Search the web or docs",
         "fetch": "Fetch a URL",
-        "curl": "HTTP request via curl",
+        "curl": "Alias of /fetch: fetch a URL",
         "browse": "Browser automation",
         "screenshot": "Capture a screenshot",
     }

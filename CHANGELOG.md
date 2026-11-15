@@ -228,6 +228,11 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   user with the same id no longer share snapshots. Snapshots saved before this release
   under the old layout are not listed. `snapshot_restore` is described as loading a
   snapshot for inspection. The feature stays off by default (`SNAPSHOT_ENABLED`). (M6-E3-T6)
+- The Telegram `/curl` command is an alias of `/fetch` and gives its result for the same
+  URL. Its output changes in three ways: it first replies "Fetching...", the page is sent
+  as plain text instead of inside a code block, and without a URL it answers
+  "Usage: /fetch <url>". The agent tool catalog describes `curl` as "Alias of /fetch".
+  (M6-E3-T4)
 
 
 ### Removed

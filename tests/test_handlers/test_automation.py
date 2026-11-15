@@ -72,6 +72,60 @@ async def test_curl_no_args(mock_update, mock_context):
     assert "Usage" in mock_update.message.reply_text.call_args[0][0]
 
 
+async def _command_output(command, mock_update, mock_context, args):
+    """What a fetch command sends for ``args``: the URL fetched, the replies and the long message."""
+    mock_update.message.reply_text.reset_mock()
+    mock_context.args = list(args)
+    with (
+        patch("koda.handlers.automation.fetch_url", new_callable=AsyncMock) as mock_fetch,
+        patch("koda.handlers.automation.send_long_message", new_callable=AsyncMock) as mock_send,
+    ):
+        mock_fetch.return_value = "<h1>Example Domain</h1>"
+        await command(mock_update, mock_context)
+    return (
+        [call.args for call in mock_fetch.call_args_list],
+        [call.args[0] for call in mock_update.message.reply_text.call_args_list],
+        [call.args[1] for call in mock_send.call_args_list],
+    )
+
+
+@pytest.mark.asyncio
+async def test_fetch_output_characterisation(mock_update, mock_context):
+    # M6-E3-T4: what /fetch answers. /curl is routed to this handler, so this is also /curl's output.
+    assert await _command_output(cmd_fetch, mock_update, mock_context, ["example.com"]) == (
+        [("https://example.com",)],
+        ["Fetching..."],
+        ["<h1>Example Domain</h1>"],
+    )
+    assert await _command_output(cmd_fetch, mock_update, mock_context, []) == ([], ["Usage: /fetch <url>"], [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("args", [["example.com"], ["https://example.com/a", "b"], []])
+async def test_curl_gives_the_fetch_result_for_the_same_url(mock_update, mock_context, args):
+    # M6-E3-T4: /curl is an alias of /fetch. Before, /curl sent no "Fetching..." notice, wrapped the
+    # page in a code block and answered "Usage: /curl <url>" without a URL.
+    fetch_output = await _command_output(cmd_fetch, mock_update, mock_context, args)
+    assert await _command_output(cmd_curl, mock_update, mock_context, args) == fetch_output
+
+
+def test_curl_is_routed_to_the_fetch_handler():
+    assert cmd_curl is cmd_fetch
+
+
+@pytest.mark.asyncio
+async def test_tool_catalog_lists_curl_as_an_alias_of_fetch():
+    import json
+    from unittest.mock import MagicMock
+
+    from koda.control_plane.api import list_agent_tools_catalog_route
+
+    response = await list_agent_tools_catalog_route(MagicMock())
+    items = {item["id"]: item["description"] for item in json.loads(response.text)["items"]}
+    assert items["fetch"] == "Fetch a URL"
+    assert items["curl"] == "Alias of /fetch: fetch a URL"
+
+
 # --- cmd_cron tests ---
 
 
