@@ -157,7 +157,7 @@ function WorkspaceSelectorDropdown({
     <div ref={rootRef} className="relative">
       <button
         type="button"
-        className="flex h-8 w-full min-w-[180px] max-w-[240px] items-center justify-between gap-2.5 rounded-[calc(var(--radius-input)-4px)] bg-transparent px-2 text-left transition-colors duration-[var(--transition-fast)] hover:bg-[var(--hover-tint)]"
+        className="flex h-8 w-full min-w-[180px] max-w-[240px] items-center justify-between gap-2.5 rounded-[calc(var(--radius-input)-4px)] bg-transparent px-2 text-left transition-colors duration-[120ms] ease-[var(--ease-out-quart)] hover:bg-[var(--hover-tint)]"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="listbox"
@@ -332,7 +332,7 @@ function CreatePopover({
       <button
         type="button"
         className={cn(
-          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[calc(var(--radius-input)-4px)] bg-[var(--panel-strong)] text-[color:var(--text-primary)] transition-colors duration-[var(--transition-fast)] hover:bg-[var(--surface-hover)] active:scale-[0.96]",
+          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[calc(var(--radius-input)-4px)] bg-[var(--panel-strong)] text-[color:var(--text-primary)] transition-colors duration-[120ms] ease-[var(--ease-out-quart)] hover:bg-[var(--surface-hover)] active:scale-[0.96]",
           open && "bg-[var(--surface-hover)]",
         )}
         aria-label={t("generated.controlPlane.criar_93c27e0c")}

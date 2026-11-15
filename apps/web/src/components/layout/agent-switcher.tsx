@@ -373,7 +373,7 @@ export function AgentSwitcher({
           className={cn(
             "flex h-8 w-full min-w-[180px] max-w-[240px] items-center justify-between gap-2.5",
             "rounded-[calc(var(--radius-input)-4px)] bg-transparent px-2 text-left",
-            "transition-colors duration-[var(--transition-fast)]",
+            "transition-colors duration-[120ms] ease-[var(--ease-out-quart)]",
             "hover:bg-[var(--hover-tint)]",
             "disabled:cursor-not-allowed disabled:opacity-60",
             open && "bg-[var(--hover-tint)]",
@@ -430,7 +430,7 @@ export function AgentSwitcher({
             className={cn(
               "inline-flex h-8 w-8 shrink-0 items-center justify-center",
               "rounded-[calc(var(--radius-input)-4px)] bg-[var(--panel-strong)] text-[color:var(--text-primary)]",
-              "transition-colors duration-[var(--transition-fast)]",
+              "transition-colors duration-[120ms] ease-[var(--ease-out-quart)]",
               "hover:bg-[var(--surface-hover)] active:scale-[0.96]",
               "disabled:cursor-not-allowed disabled:opacity-60",
             )}

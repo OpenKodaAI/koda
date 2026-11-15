@@ -89,7 +89,7 @@ export function ConfirmationDialog({
               ref={cancelRef}
               type="button"
               onClick={onCancel}
-              className="inline-flex h-9 items-center justify-center rounded-[var(--radius-panel-sm)] px-3.5 text-[length:var(--font-size-sm)] font-medium text-[color:var(--text-secondary)] transition-colors duration-[var(--transition-fast)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]"
+              className="inline-flex h-9 items-center justify-center rounded-[var(--radius-panel-sm)] px-3.5 text-[length:var(--font-size-sm)] font-medium text-[color:var(--text-secondary)] transition-colors duration-[120ms] ease-[var(--ease-out-quart)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]"
             >
               {t("common.cancel")}
             </button>
@@ -99,7 +99,7 @@ export function ConfirmationDialog({
               disabled={confirmBusy}
               aria-label={confirmBusy ? confirmBusyLabel ?? resolvedConfirmLabel : undefined}
               aria-busy={confirmBusy || undefined}
-              className="inline-flex h-9 min-w-20 items-center justify-center rounded-[var(--radius-panel-sm)] bg-[var(--tone-danger-bg-strong)] px-3.5 text-[length:var(--font-size-sm)] font-medium text-[color:var(--tone-danger-text)] transition-colors duration-[var(--transition-fast)] hover:bg-[color:var(--tone-danger-dot)] disabled:cursor-not-allowed disabled:opacity-70"
+              className="inline-flex h-9 min-w-20 items-center justify-center rounded-[var(--radius-panel-sm)] bg-[var(--tone-danger-bg-strong)] px-3.5 text-[length:var(--font-size-sm)] font-medium text-[color:var(--tone-danger-text)] transition-colors duration-[120ms] ease-[var(--ease-out-quart)] hover:bg-[color:var(--tone-danger-dot)] disabled:cursor-not-allowed disabled:opacity-70"
             >
               {confirmBusy ? <InlineSpinner className="h-4 w-4" /> : resolvedConfirmLabel}
             </button>
