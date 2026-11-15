@@ -66,7 +66,7 @@ jump ahead of high-severity items in a later milestone just because of their mil
 | `TD-NNN` | Debt item in TECHNICAL_DEBT.md Part 2 |
 | `SM-NN` | Runtime-smoke defect FEATURE_MATRIX.md §3.4 `D-NN` (renamed here to avoid a clash with `D-NNN`) |
 | `J-NN` | Journey in FEATURE_MATRIX.md §3.2 |
-| `Q-n` | Open decision `D-n` in ARCHITECTURE_AUDIT.md §11 (renamed here). Q-21 to Q-29 are added in section 5. |
+| `Q-n` | Open decision `D-n` in ARCHITECTURE_AUDIT.md §11 (renamed here). Q-21 to Q-30 are added in section 5. |
 | `P<n>` | Design principle in REFERENCE_RESEARCH.md §6 |
 | `ADR-NNN` | Entry in DECISIONS.md |
 | `R-NN` | Entry in REMAINING_RISKS.md |
@@ -286,6 +286,7 @@ in `koda/knowledge`). Both are cheap to leave; revisit only if the code is touch
 | Q-27 | Project-scope MCP configs (`.mcp.json`, `.gemini/settings.json`, `.codex/config.toml`, `.codex/*.config.toml`) are refused by the file tools and `/cat` wherever they sit, as `.env` and `*.pem` are (WAVE-2A) | Keep: they hold MCP secrets in clear text; the alternative refuses only the HOME copies and needs a path-anchored rule | open (§13: changes what agents and operators can read in a project) | none |
 | Q-28 | With `KNOWLEDGE_V2_STORAGE_MODE=off` (not the default), M4-E1-T6 removed four side effects that ran before retrieval raised on every turn: pack and workspace sources registered, artifact evidence written and read. The artifact-evidence table was never created, so those writes and reads never stored or returned a row | Accept the removal (applied; rollback: revert the manager.py and storage_v2.py parts of b845d89 and f989685) | open (§13 confirmation of ADR-015's interim approval; the default is applied) | none |
 | Q-29 | Release v1.0.18 stopped at `publish-npm` (run 26138278216): the GitHub release is a draft and the seven GHCR images are published, but npm still serves the previous version | Ship the next version normally and keep the CHANGELOG note; republishing 1.0.18 needs the npm credentials and a release run | open (§13: production release and credentials) | none |
+| Q-30 | `MEMORY_SIMILARITY_DEDUP_THRESHOLD` is an operator-visible per-agent memory-policy field (editor, agent spec, memory profiles, system settings) that nothing reads | Remove the field with a changelog entry: it never had an effect | open (§13: removes an operator-visible setting) | M4-E1-T2 follow-up |
 
 ### 5.2 Approvals required
 
@@ -729,20 +730,20 @@ Owner SEC · Risk low · Gate none · **done** · Deps —
 - **Tests:** log-capture unit test of the control-plane entrypoint; G · **Evidence:** VALIDATION_REPORT.md "Lane merges 2026-11-15": the control plane configures redacting structured logs at startup, LOG_FORMAT=json keeps exceptions, the setup code and secrets never reach logs (e046426, 57ca0f0)
 
 #### M1-E1-T5 · Failed logins return 401
-Owner SEC · Risk med · Gate none · **pending** · Deps M0-E3-T1, M0-E3-T6
+Owner SEC · Risk med · Gate none · **done** · Deps M0-E3-T1, M0-E3-T6
 - **Addresses:** D-135, F-SET-01
 - **Files:** `koda/control_plane/operator_auth.py`, `koda/control_plane/api.py` (~363), `apps/web/src/app/api/control-plane/auth/login/route.ts`, `docs/security/authentication.md`
 - **Do:** raise a typed `AuthError` for bad credentials and map it to 401, so that the auth-failure rate-limit bucket applies. Keep the UI copy.
 - **Done when:** a wrong password returns 401 from :8090, the auth-failure bucket counts it, and J-05 shows the same UI copy.
-- **Tests:** unit test; Postgres auth test; route matrix; G; changelog entry · **Evidence:** —
+- **Tests:** unit test; Postgres auth test; route matrix; G; changelog entry · **Evidence:** VALIDATION_REPORT.md "Integration batch 3": a wrong password answers 401 and counts in the auth-failure bucket (D-135)
 
 #### M1-E1-T13 · Login timing floor for unknown identifiers
-Owner SEC · Risk med · Gate none · **pending** · Deps M0-E3-T6
+Owner SEC · Risk med · Gate none · **done** · Deps M0-E3-T6
 - **Addresses:** D-136, F-SET-02
 - **Files:** `koda/control_plane/operator_auth.py` (~49), `docs/security/authentication.md`
 - **Do:** run a dummy argon2 verify for unknown identifiers and pad every failed login to a fixed floor (default 300 ms, a named constant).
 - **Done when:** in a test of 1,000 failed logins each for a known and an unknown identifier, every attempt takes at least the floor and the two medians differ by less than 10 ms.
-- **Tests:** timing test (marked slow, run in G); G · **Evidence:** —
+- **Tests:** timing test (marked slow, run in G); G · **Evidence:** VALIDATION_REPORT.md "Integration batch 3": every rejected sign-in and password recovery takes a fixed 300 ms floor counted from the read body, with the same work for unknown, locked and wrong-secret cases (D-136)
 
 #### M1-E1-T14 · Regenerate an expired bootstrap file
 Owner SEC · Risk low · Gate none · **pending** · Deps M0-E3-T6
@@ -978,36 +979,36 @@ Owner SEC · Risk low · Gate none · **done** · Deps —
 - **Tests:** unit matrix; G · **Evidence:** VALIDATION_REPORT.md "WAVE-2A": option-injection probes rejected for every git tool and `/git`; normal git calls pass; gates at c0ab8c6
 
 #### M1-E4-T2 · Frame tool output as untrusted data
-Owner SEC (AIM) · Risk med · Gate none · **ready** · Deps —
+Owner SEC (AIM) · Risk med · Gate none · **done** · Deps —
 - **Addresses:** D-025, F-ORC-10, F-SKL-16, F-QA-05
 - **Files:** `koda/services/tool_dispatcher.py` (~976), `koda/services/tool_prompt.py`, `koda/services/mcp_bridge.py`
 - **Do:** escape `</tool_result>`, `<agent_cmd` and the sibling delimiters inside tool results. Wrap results in an explicit untrusted-data frame, and do not translate the existing PT-BR prompt text. Sanitise and cap third-party MCP tool descriptions.
 - **Done when:** injection fixtures cannot close the frame or inject `<agent_cmd>`, and prompt snapshots are reviewed.
-- **Tests:** unit tests plus new adversarial guardrail cases; G · **Evidence:** —
+- **Tests:** unit tests plus new adversarial guardrail cases; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 3": tool results are wrapped in an `<untrusted_data>` frame with protocol tags escaped; MCP tool names, descriptions and parameter fields are sanitised and capped; adversarial fixtures cannot close the frame or inject `<agent_cmd>`
 
 #### M1-E4-T3 · The model cannot approve its own package review
-Owner SEC · Risk med · Gate none · **ready** · Deps —
+Owner SEC · Risk med · Gate none · **done** · Deps —
 - **Addresses:** D-031, F-SKL-21
 - **Files:** `koda/services/tool_dispatcher.py` (~3116), the control-plane skill routes, the web skills tab
 - **Do:** remove `review_accepted` and `approved` as model-supplied parameters, and drop the scan message that tells the model to retry with them. A review is accepted only through an operator-authenticated control-plane action bound to the package's `package_hash`, and the review screen shows the hash, the scanner version and the verdict.
 - **Done when:** a model call with `review_accepted=true` cannot install a review-required package, and an operator approval through the control plane can.
-- **Tests:** unit tests; G-PG for the approval record; G; changelog entry (tool parameters) · **Evidence:** —
+- **Tests:** unit tests; G-PG for the approval record; G; changelog entry (tool parameters) · **Evidence:** VALIDATION_REPORT.md "Integration batch 3": the model can no longer accept a package review; only the operator-authenticated control-plane route, bound to the package hash, can; the approval is recorded in Postgres
 
 #### M1-E4-T11 · Verify the approved package hash at load time
-Owner SEC · Risk med · Gate none · **ready** · Deps —
+Owner SEC · Risk med · Gate none · **done** · Deps —
 - **Addresses:** D-037, F-SKL-22
 - **Files:** `koda/skills/_package.py` (~555)
 - **Do:** before loading package code, hash the files on disk and compare them with the approved `package_hash`. On a mismatch, refuse to load and report the package as modified. A rollback whose files no longer match also refuses, and asks for a reinstall. No new package store is introduced.
 - **Done when:** a file changed after approval makes the package refuse to load with a clear status, and an untouched package loads.
-- **Tests:** unit tests; G · **Evidence:** —
+- **Tests:** unit tests; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 3": a package whose files differ from the approved hash (sources under `__pycache__` included) is refused at load and reported as modified; a mismatching rollback asks for a reinstall
 
 #### M1-E4-T12 · Plugin handler paths stay inside the plugin
-Owner SEC · Risk low · Gate none · **ready** · Deps —
+Owner SEC · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-138, F-SKL-21
 - **Files:** `koda/plugins/registry.py` (~175)
 - **Do:** apply `_safe_child_path` in `_load_handler` and on the legacy reload path, and load handlers without mutating `sys.path`.
 - **Done when:** a handler `/tmp/evil.fn` or `../x.fn` is rejected, and `sys.path` is unchanged after a reload.
-- **Tests:** unit tests; G · **Evidence:** —
+- **Tests:** unit tests; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 3": plugin handlers resolve through `_safe_child_path` on register and legacy reload, and loading no longer changes `sys.path`
 
 #### M1-E4-T4 · Trust model for skill and plugin code
 Owner SEC (ARCH) · Risk med · Gate needs-approval (§13: security policy affecting users; approval batch 1) · **blocked** · Deps M1-E4-T3, M1-E4-T11
@@ -1018,12 +1019,12 @@ Owner SEC (ARCH) · Risk med · Gate needs-approval (§13: security policy affec
 - **Tests:** adversarial package fixtures; G; changelog entry · **Evidence:** —
 
 #### M1-E4-T5 · Unknown tools are write tools
-Owner SEC · Risk low · Gate none · **ready** · Deps —
+Owner SEC · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-132, F-SKL-01
 - **Files:** `koda/services/tool_dispatcher.py` (`_is_write_tool` ~999)
 - **Do:** treat uncatalogued, non-skill-package tools as write tools, matching the policy envelope.
 - **Done when:** the dry-run, supervised, confidence and skip-after-blocked-write gates apply to them.
-- **Tests:** unit tests; G · **Evidence:** —
+- **Tests:** unit tests; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 3": uncatalogued non-skill-package tools are write tools, so the dry-run, supervised, confidence and skip-after-blocked-write gates apply to them
 
 #### M1-E4-T6 · Apply stored MCP isolation settings
 Owner SEC (BE) · Risk med · Gate none · **ready** · Deps —
@@ -1653,7 +1654,7 @@ Owner BE · Risk low · Gate none · **done** · Deps DEFECT-BATCH-1 (D-009) mer
 
 #### M3-E3-T1 · Policy-approved shell, git and supervised writes execute
 Owner SEC (BE, review REV) · Risk high · Gate needs-approval (§13: permission policy affecting users; approval batch 1) · **blocked** · Deps M0-E2-T4, M1-E2-T1, M1-E4-T1, M1-E4-T10, M1-E4-T13
-- **Addresses:** D-011, F-SKL-06, F-SKL-07, F-GOV-08, TD-041, R-48
+- **Addresses:** D-278 (the policy gate denies `shell_execute` and `git_status` under every policy; align their integration ids with the catalog), D-011, F-SKL-06, F-SKL-07, F-GOV-08, TD-041, R-48
 - **Why gated:** these calls have never run in production, because D-011 makes them fail closed by accident. Fixing it widens what agents can actually do.
 - **Approval package:** a read-only report, recorded in VALIDATION_REPORT.md, listing every agent and published policy rule that allows `shell_execute`, `shell_bg`, `git_*` or supervised writes, which are the calls that would start executing. The operator chooses between enabling them for the listed agents, or a per-agent enable that defaults to off.
 - **Files:** `koda/services/shell_runner.py` (~29), `koda/services/tool_dispatcher.py` (~748-799), `koda/utils/approval.py`
@@ -1923,28 +1924,28 @@ separate task outside M4 (section 4.2), and the M4 task leaves the behaviour as 
 #### M4-E1 — Python
 
 #### M4-E1-T1 · Dead core helpers
-Owner BE · Risk low · Gate none · **ready** · Deps —
+Owner BE · Risk low · Gate none · **done** · Deps —
 - **Addresses:** TD-012, TD-013, TD-014, TD-015, F-PLT-08, F-ORC-03 (per-user semaphore)
 - **Files:** `koda/startup_validator.py`; `queue_manager.py` (~1453-1458, ~1612-1645, ~1889-1893, ~2657-2690, ~7598-7611, ~8803-8828); `llm_runner.py` (~289); `openai_compatible_runner.py` (~319, ~502); `tests/test_services/test_global_semaphore.py`
 - **Do:** remove the legacy tuple queue items, the per-user semaphore, `warm_provider_capabilities`, `stdout_path` and `process_holder['task']`. Keep `is_admin` until Q-12 is decided, and leave `budget_exceeded` to M2-E4-T5. The health field that `warm_provider_capabilities` was meant to fill is never set today and stays as it is; M7-E1-T9 removes it.
 - **Done when:** the names are absent and G is green.
-- **Tests:** G · **Evidence:** —
+- **Tests:** G · **Evidence:** VALIDATION_REPORT.md "Integration batch 3": legacy tuple queue items, the per-user semaphore, startup_validator, warm_provider_capabilities, stdout_path and process_holder["task"] are removed
 
 #### M4-E1-T2 · Dead configuration knobs
-Owner BE · Risk low · Gate none · **ready** · Deps —
+Owner BE · Risk low · Gate none · **done** · Deps —
 - **Addresses:** TD-003, D-194, F-PLT-07
 - **Files:** `koda/config.py` (lines listed in TD-003), `koda/memory/config.py`, `koda/knowledge/config.py`, `koda/control_plane/manager.py` (~675, ~702), `.env.example`, `docs/config/reference.md`
 - **Do:** remove the dead knobs, including Neo4j and the unread `PLUGIN_*` and `RUNTIME_*` keys, and the operator-visible runtime settings nothing reads. Keep `PLUGIN_SANDBOX_ENABLED` until M1-E4-T4.
 - **Done when:** no removed key is read anywhere, and docs and `.env.example` match.
-- **Tests:** G; changelog entry · **Evidence:** —
+- **Tests:** G; changelog entry · **Evidence:** VALIDATION_REPORT.md "Integration batch 3": 20 unread configuration keys and 4 runtime settings removed; `.env.example` and docs match; MEMORY_SIMILARITY_DEDUP_THRESHOLD kept for Q-30
 
 #### M4-E1-T3 · Service shims and no-op fallbacks
-Owner BE · Risk low · Gate none · **ready** · Deps —
+Owner BE · Risk low · Gate none · **done** · Deps —
 - **Addresses:** TD-048, TD-050, TD-051, TD-057, TD-058, TD-060, TD-061, TD-066, F-SCH-03, F-MON-26, F-QA-25
 - **Files:** `koda/services/{scheduler,cron_store}.py`, `koda/services/runtime/{store,smoke,recovery_manager}.py`, `koda/dashboard/`, `koda/services/metrics.py`, `koda/services/resilience.py`, `koda/services/audit.py` (~162-174)
 - **Do:** delete the shims, the passthrough store, the dashboard aggregator and the runtime smoke harness. Delete the no-op prometheus and pybreaker fallbacks, and the metrics that are never set and never reported. Simplify RecoveryManager to its single action. Breakers and fields that `/health` reports stay; M7-E1-T9 changes the payload.
 - **Done when:** the names are absent, G is green, and a snapshot test shows the `/health` payload unchanged.
-- **Tests:** G · **Evidence:** —
+- **Tests:** G · **Evidence:** VALIDATION_REPORT.md "Integration batch 3": shims, the pass-through runtime store, the smoke harness, the dashboard aggregator, no-op fallbacks and never-set metrics removed; a snapshot test pins the /health payload
 
 #### M4-E1-T4 · DBManager and boot-time SSH tunnels
 Owner BE (SEC, review REV) · Risk low · Gate none · **ready** · Deps —
@@ -1983,12 +1984,12 @@ Owner AIM · Risk low · Gate none · **ready** · Deps —
 - **Tests:** G, G-PG · **Evidence:** —
 
 #### M4-E1-T8 · Dead control-plane code
-Owner BE · Risk low · Gate none · **ready** · Deps —
+Owner BE · Risk low · Gate none · **done** · Deps —
 - **Addresses:** TD-070, TD-071 (except `archive_agent`, which Q-11 needs), TD-038, TD-037, F-GOV-11
 - **Files:** `koda/control_plane/manager.py` (~1554-1569, ~13003-13530), `koda/control_plane/settings.py` (~130-131), `koda/control_plane/api.py` (~529-540), `koda/control_plane/onboarding.py` (`render_setup_page`), `koda/integrations/custom_mcp_registry.py` (~216-236), `koda/services/sandbox_policy.py` (~276-285)
 - **Do:** remove the legacy import, the 410 endpoint, the legacy HTML setup page and the unverified HMAC signature. Reduce `sandbox_policy` to the evaluation that doctor uses.
 - **Done when:** the route matrix shows the removed endpoint gone, and doctor still passes.
-- **Tests:** G · **Evidence:** —
+- **Tests:** G · **Evidence:** VALIDATION_REPORT.md "Integration batch 3": the legacy import, the 410 bootstrap endpoint, the HTML /setup page, the unverified MCP HMAC and the unused sandbox gates removed; doctor still passes
 
 #### M4-E1-T9 · Duplicate MCP catalog and decrypt helpers
 Owner BE · Risk low · Gate none · **done** · Deps —
@@ -1999,12 +2000,12 @@ Owner BE · Risk low · Gate none · **done** · Deps —
 - **Tests:** G · **Evidence:** VALIDATION_REPORT.md "Lane merges 2026-11-15": one MCP catalog module and one env decrypt helper used everywhere (de5d1fe, 17aa6b8, 54dd586)
 
 #### M4-E1-T10 · Non-functional webhook tools
-Owner BE · Risk low · Gate none · **ready** · Deps —
+Owner BE · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-067, TD-045
 - **Files:** `koda/services/webhook_manager.py`, the webhook and `event_wait` handlers in `tool_dispatcher.py`, `tool_prompt.py`
 - **Do:** remove the webhook and `event_wait` tools, which can never receive an event, from the dispatcher, the prompt and the catalog. The `/curl` and `/fetch` commands are not touched here (M6-E3-T4).
 - **Done when:** the tools are absent from the agent prompt, and no handler references `webhook_manager`.
-- **Tests:** G; changelog entry (agent tool list) · **Evidence:** —
+- **Tests:** G; changelog entry (agent tool list) · **Evidence:** VALIDATION_REPORT.md "Integration batch 3": the webhook and event_wait tools, webhook_manager and the WEBHOOK_* settings are removed from the dispatcher, prompt and catalog
 
 #### M4-E1-T11 · SQLite branches and `STATE_BACKEND` modes
 Owner BE · Risk med · Gate none · **ready** · Deps —
@@ -2031,12 +2032,12 @@ Owner AIM · Risk low · Gate none · **ready** · Deps —
 - **Tests:** G; changelog entry (removed configuration keys) · **Evidence:** —
 
 #### M4-E1-T14 · Artifact evidence writes to a missing table
-Owner AIM · Risk low · Gate none · **ready** · Deps —
+Owner AIM · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-260
 - **Files:** `koda/knowledge/repository.py` (`batch_upsert_artifact_evidence`), `koda/knowledge/graph_materializer.py` (~89), `koda/services/queue_manager.py` (`_persist_artifact_evidence_nodes` and its call site)
 - **Do:** prove no schema creates `artifact_evidence_nodes` and no reader uses it (grep and a Postgres check). Then delete the write path and its callers.
 - **Done when:** the names are absent, no code references the table, and the queue and knowledge tests pass unchanged.
-- **Tests:** G, G-PG · **Evidence:** —
+- **Tests:** G, G-PG · **Evidence:** VALIDATION_REPORT.md "Integration batch 3": the artifact_evidence_nodes write path and its callers are removed; a Postgres test applies every migration and finds no such table
 
 #### M4-E2 — Rust and infrastructure
 

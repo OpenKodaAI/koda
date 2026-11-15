@@ -147,6 +147,19 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   files no longer match its revision (an update that overwrote the same directory) is
   refused with `skill.package_modified` (409) and asks for a reinstall.
   (M1-E4-T11, D-037)
+- Tool results reach the model inside an `<untrusted_data>` frame, with protocol tags in
+  tool output escaped, so a fetched page or file cannot close the frame or issue a tool
+  call. Third-party MCP tool names, descriptions and parameters are sanitised and
+  capped. (M1-E4-T2, D-025)
+- Tools that are not in the catalog and are not skill-package tools count as write tools,
+  so dry-run, supervised mode and the confidence gate apply to them. (M1-E4-T5, D-132)
+- Plugin handler paths must stay inside the plugin, on register and on reload, and
+  loading a handler no longer changes `sys.path`. (M1-E4-T12, D-138)
+- A wrong password at sign-in answers 401 instead of 400. Every rejected sign-in and
+  password recovery takes at least 300 ms from when its body is read, with the same
+  work whether the account exists, is locked or the secret is wrong. (M1-E1-T5,
+  M1-E1-T13, D-135, D-136)
+
 
 ### Added
 
@@ -270,6 +283,9 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   server list and the MCP catalog no longer return it, neither as a field nor inside
   `metadata`, where servers saved before this change still hold a copy until they are
   next updated. (M4-E1-T8, TD-038)
+- The `artifact_evidence_nodes` write path is gone: no schema ever created that table, so
+  every write failed. (M4-E1-T14, D-260)
+
 
 ### Fixed
 
