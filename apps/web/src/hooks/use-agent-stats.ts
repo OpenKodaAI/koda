@@ -10,6 +10,8 @@ import { queryKeys } from "@/lib/query/keys";
 
 type UseAgentStatsOptions = {
   recentTaskLimit?: number;
+  /** When false the query neither fetches nor polls. Defaults to true. */
+  enabled?: boolean;
 };
 
 export function useAgentStats(agentId?: string, options?: UseAgentStatsOptions) {
@@ -19,6 +21,7 @@ export function useAgentStats(agentId?: string, options?: UseAgentStatsOptions) 
     queryKey: agentId
       ? queryKeys.dashboard.agentStatsDetail(agentId, recentTaskLimit)
       : queryKeys.dashboard.agentStatsSummary(recentTaskLimit),
+    enabled: options?.enabled ?? true,
     // Silent background refetches: only re-render subscribers when `data` or `error`
     // actually changes. Combined with `useContentStable` below this makes polling
     // invisible to the render tree when payload content hasn't moved.

@@ -18,7 +18,10 @@ import "@/lib/contracts/onboarding-readiness";
 import "@/lib/contracts/handoffs";
 import "@/lib/contracts/quality-cockpit";
 import { controlPlaneFetch, sanitizeControlPlanePayload } from "@/lib/control-plane";
-import { getControlPlaneMutationInvalidation } from "@/lib/control-plane-cache";
+import {
+  getControlPlaneMutationInvalidation,
+  shouldRevalidateLayoutAfterMutation,
+} from "@/lib/control-plane-cache";
 import { isPublicControlPlaneApiPath } from "@/lib/public-control-plane-paths";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
 import {
@@ -474,7 +477,9 @@ async function handleControlPlaneProxy(request: NextRequest, { params }: RouteCo
       revalidateTag(tag, "max");
     }
 
-    revalidatePath("/", "layout");
+    if (shouldRevalidateLayoutAfterMutation(path)) {
+      revalidatePath("/", "layout");
+    }
 
     for (const routePath of invalidation.paths) {
       revalidatePath(routePath);

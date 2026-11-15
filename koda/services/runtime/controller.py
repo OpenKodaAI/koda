@@ -170,7 +170,7 @@ class RuntimeController:
         self._resource_task = None
         self._attach_reaper_task = None
         self._reconcile_task = None
-        for env in self.store.list_environments():
+        for env in self.store.list_live_environments():
             if str(env.get("status")) == "active" and env.get("workspace_path") and not env.get("save_verified_at"):
                 with contextlib.suppress(Exception):
                     await self.finalize_task(
@@ -234,21 +234,23 @@ class RuntimeController:
         while True:
             await asyncio.sleep(RUNTIME_RESOURCE_SAMPLE_INTERVAL_SECONDS)
             try:
-                for env in self.store.list_environments():
-                    if not self._should_sample_environment(env):
-                        continue
-                    sample_id = await self.record_resource_sample(task_id=int(env["task_id"]), env_id=int(env["id"]))
-                    await self.events.publish(
-                        task_id=int(env["task_id"]),
-                        env_id=int(env["id"]),
-                        attempt=None,
-                        phase=str(env.get("current_phase") or ""),
-                        event_type="resource.sampled",
-                        payload={"sample_id": sample_id, "source": "resource_loop"},
-                        resource_snapshot_ref=str(sample_id),
-                    )
+                await self.sample_resources()
             except Exception:
                 log.exception("resource_sample_failed")
+
+    async def sample_resources(self) -> None:
+        """Record a resource sample for every environment that still runs something."""
+        for env in self.store.list_environments_to_sample():
+            sample_id = await self.record_resource_sample(task_id=int(env["task_id"]), env_id=int(env["id"]))
+            await self.events.publish(
+                task_id=int(env["task_id"]),
+                env_id=int(env["id"]),
+                attempt=None,
+                phase=str(env.get("current_phase") or ""),
+                event_type="resource.sampled",
+                payload={"sample_id": sample_id, "source": "resource_loop"},
+                resource_snapshot_ref=str(sample_id),
+            )
 
     async def _attach_reaper_loop(self) -> None:
         while True:
@@ -374,12 +376,6 @@ class RuntimeController:
             event.clear()
         else:
             event.set()
-
-    def _has_alive_recorded_processes(self, *, task_id: int, env_id: int) -> bool:
-        return any(
-            str(process_row.get("status") or "") != "exited"
-            for process_row in self.store.list_processes(task_id, env_id=env_id)
-        )
 
     def get_runtime_kernel_health(self) -> dict[str, Any]:
         """Return a normalized kernel health payload for the gRPC migration seam."""
@@ -1100,25 +1096,8 @@ class RuntimeController:
             },
         }
 
-    def _should_sample_environment(self, env: dict[str, Any]) -> bool:
-        status = str(env.get("status") or "")
-        if status in {"active", "cleaning"}:
-            return True
-        if status != "retained":
-            return False
-        task_id = int(env["task_id"])
-        env_id = int(env["id"])
-        if self._has_alive_recorded_processes(task_id=task_id, env_id=env_id):
-            return True
-        if any(str(item.get("status")) == "active" for item in self.store.list_attach_sessions(task_id)):
-            return True
-        return any(
-            str(item.get("status")) == "active" and int(item.get("env_id") or 0) == env_id
-            for item in self.store.list_browser_sessions(task_id)
-        )
-
     async def rehydrate_live_environments(self) -> None:
-        for env in self.store.list_environments():
+        for env in self.store.list_live_environments():
             if str(env.get("status")) in {"cleaned", "cleaning"}:
                 continue
             await self._rehydrate_environment_state(int(env["task_id"]), env)
@@ -3211,7 +3190,7 @@ class RuntimeController:
         }
 
     async def reconcile_runtime_state(self) -> None:
-        for env in self.store.list_environments():
+        for env in self.store.list_live_environments():
             task_id = int(env["task_id"])
             env_id = int(env["id"])
             snapshot = await self._kernel_activity_snapshot(task_id=task_id)
@@ -3861,7 +3840,7 @@ class RuntimeController:
 
     async def cleanup_expired(self) -> None:
         now = datetime.now(UTC).isoformat()
-        for env in self.store.list_environments():
+        for env in self.store.list_live_environments():
             expires_at = env.get("retention_expires_at")
             if not expires_at or env.get("is_pinned"):
                 continue

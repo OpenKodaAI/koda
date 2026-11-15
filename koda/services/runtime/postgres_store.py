@@ -1365,8 +1365,11 @@ class PostgresRuntimeStore:
         )
 
     def list_environments(self) -> list[dict[str, Any]]:
+        return self._list_environments_where("TRUE", ())
+
+    def _list_environments_where(self, condition: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
         rows = self._fetch_all(
-            """
+            f"""
             SELECT id, task_id, user_id, chat_id, classification, environment_kind, isolation, duration,
                    status, current_phase, workspace_path, runtime_dir, base_work_dir,
                    base_work_dir AS source_root_path, branch_name,
@@ -1376,12 +1379,61 @@ class PostgresRuntimeStore:
                    pause_state, pause_reason, save_verified_at, process_pid, process_pgid, browser_scope_id,
                    created_at, updated_at, last_heartbeat_at, retention_expires_at
             FROM runtime_environments
-            WHERE agent_id = ?
+            WHERE agent_id = ? AND ({condition})
             ORDER BY id DESC
+            """,
+            (self._agent_scope, *params),
+        )
+        return [cast(dict[str, Any], _with_source_root_exists(row)) for row in rows]
+
+    def list_live_environments(self) -> list[dict[str, Any]]:
+        """Environments the runtime sweeps still act on.
+
+        Cleaned environments are history and are left out, unless a process
+        row of theirs is not marked exited yet, which the reconcile sweep still
+        settles. The sweeps therefore cost the same however many environments
+        were ever created.
+        """
+        return self._list_environments_where(
+            """
+            status <> 'cleaned'
+            OR (task_id, id) IN (
+                SELECT task_id, env_id FROM runtime_processes
+                WHERE agent_id = ? AND env_id IS NOT NULL AND status <> 'exited'
+            )
             """,
             (self._agent_scope,),
         )
-        return [cast(dict[str, Any], _with_source_root_exists(row)) for row in rows]
+
+    def list_environments_to_sample(self) -> list[dict[str, Any]]:
+        """Environments the resource sweep samples, selected in one query.
+
+        Active and cleaning environments, plus retained ones that still have a
+        process not marked exited, an active attach session on their task, or an
+        active browser session of their own.
+        """
+        return self._list_environments_where(
+            """
+            status IN ('active', 'cleaning')
+            OR (
+                status = 'retained'
+                AND (
+                    (task_id, id) IN (
+                        SELECT task_id, env_id FROM runtime_processes
+                        WHERE agent_id = ? AND env_id IS NOT NULL AND status <> 'exited'
+                    )
+                    OR task_id IN (
+                        SELECT task_id FROM runtime_attach_sessions WHERE agent_id = ? AND status = 'active'
+                    )
+                    OR (task_id, id) IN (
+                        SELECT task_id, env_id FROM runtime_browser_sessions
+                        WHERE agent_id = ? AND env_id IS NOT NULL AND status = 'active'
+                    )
+                )
+            )
+            """,
+            (self._agent_scope, self._agent_scope, self._agent_scope),
+        )
 
     def get_environment(self, env_id: int) -> dict[str, Any] | None:
         return _with_source_root_exists(

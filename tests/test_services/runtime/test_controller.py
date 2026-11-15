@@ -72,6 +72,9 @@ class _StoreStub:
     def list_environments(self) -> list[dict[str, Any]]:
         return [self.env] if self.env else []
 
+    def list_live_environments(self) -> list[dict[str, Any]]:
+        return self.list_environments()
+
     def get_environment_by_task(self, task_id: int) -> dict[str, Any] | None:
         if self.env and int(self.env["task_id"]) == task_id:
             return self.env
@@ -2176,7 +2179,6 @@ async def test_recover_task_prefers_kernel_cleanup_for_old_workspace(
     controller._rehydrate_environment_state = _rehydrate_environment_state  # type: ignore[method-assign]
     store.get_latest_checkpoint = lambda task_id: {"id": 91, "checkpoint_dir": str(checkpoint_dir)}  # type: ignore[attr-defined]
     store.add_recovery_action = lambda **kwargs: 1  # type: ignore[attr-defined]
-    monkeypatch.setattr(controller, "_has_alive_recorded_processes", lambda **kwargs: False)
 
     result = await controller.recover_task(task_id=1, actor="test")
 
@@ -2262,7 +2264,6 @@ async def test_recover_task_prefers_kernel_restore_when_rust_requires_it(
     controller = _build_controller(monkeypatch, tmp_path, store=store, kernel=kernel)
     store.get_latest_checkpoint = lambda task_id: {"id": 91, "checkpoint_dir": str(tmp_path / "checkpoint")}  # type: ignore[attr-defined]
     store.add_recovery_action = lambda **kwargs: 1  # type: ignore[attr-defined]
-    monkeypatch.setattr(controller, "_has_alive_recorded_processes", lambda **kwargs: False)
 
     result = await controller.recover_task(task_id=1, actor="test")
 
@@ -2326,7 +2327,6 @@ async def test_recover_task_fails_closed_when_rust_requires_kernel_recreate(
     )
     controller = _build_controller(monkeypatch, tmp_path, store=store, kernel=kernel)
     store.get_latest_checkpoint = lambda task_id: {"id": 91, "checkpoint_dir": str(checkpoint_dir)}  # type: ignore[attr-defined]
-    monkeypatch.setattr(controller, "_has_alive_recorded_processes", lambda **kwargs: False)
 
     with pytest.raises(RuntimeError, match="runtime kernel create_environment required during recovery"):
         await controller.recover_task(task_id=1, actor="test")

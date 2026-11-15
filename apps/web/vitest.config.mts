@@ -15,8 +15,6 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
-    fileParallelism: false,
-    maxWorkers: 1,
     include: ["src/**/*.test.{ts,tsx}"],
     exclude: ["tests/e2e/**", "node_modules/**", "dist/**", ".next/**"],
     testTimeout: 15_000,
