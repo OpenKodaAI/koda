@@ -5633,8 +5633,14 @@ class ControlPlaneManager:
             schema=KNOWLEDGE_V2_POSTGRES_SCHEMA,
             embedding_dimension=KNOWLEDGE_V2_EMBEDDING_DIMENSION,
         )
+
+        async def _bootstrap() -> bool:
+            # The bridge stops waiting after PRIMARY_STATE_BRIDGE_TIMEOUT_SECONDS;
+            # the shield keeps that from cancelling the migrations (D-285).
+            return bool(await asyncio.shield(backend.bootstrap()))
+
         try:
-            bootstrapped = bool(run_coro_sync(backend.bootstrap()))
+            bootstrapped = bool(run_coro_sync(_bootstrap()))
             health = dict(run_coro_sync(backend.health()))
         except Exception as exc:
             return {

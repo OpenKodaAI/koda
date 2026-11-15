@@ -6,6 +6,7 @@ import asyncio
 import concurrent.futures
 import contextlib
 import functools
+import math
 import os
 import re
 import threading
@@ -150,7 +151,8 @@ def run_coro_sync(coro: Any, *, timeout: float | None = None) -> Any:
     """Run an async primary-backend operation from sync callers.
 
     ``timeout`` replaces ``PRIMARY_STATE_BRIDGE_TIMEOUT_SECONDS`` as the bridge
-    wait for an operation of several steps.
+    wait for an operation of several steps; ``math.inf`` waits for as long as
+    the operation runs.
 
     Two dispatch modes:
 
@@ -176,7 +178,7 @@ def run_coro_sync(coro: Any, *, timeout: float | None = None) -> Any:
         wait = _BRIDGE_TIMEOUT_SECONDS if timeout is None else timeout
         future = asyncio.run_coroutine_threadsafe(coro, loop)
         try:
-            return future.result(timeout=wait)
+            return future.result(timeout=None if math.isinf(wait) else wait)
         except concurrent.futures.TimeoutError as exc:
             future.cancel()
             raise TimeoutError(f"primary_state_bridge_timeout_after_{wait:g}s") from exc

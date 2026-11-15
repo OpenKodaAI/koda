@@ -312,7 +312,9 @@ class KnowledgeV2PostgresBackend:
             if self._ready:
                 return True
             try:
-                conn = await self._open_direct_connection()
+                # No query timeout: a migration step such as an index build on
+                # a large table can run longer than any query (D-285).
+                conn = await self._open_direct_connection(query_timeout=False)
                 try:
                     # This connection has no startup search_path, so it reports the default.
                     self._default_search_path = str(await conn.fetchval("SHOW search_path") or "")
@@ -497,7 +499,13 @@ class KnowledgeV2PostgresBackend:
         except TypeError:
             return self._pool.acquire()
 
-    async def _open_direct_connection(self, *, server_settings: dict[str, str] | None = None) -> Any:
+    async def _open_direct_connection(
+        self,
+        *,
+        server_settings: dict[str, str] | None = None,
+        query_timeout: bool = True,
+    ) -> Any:
+        """Open a connection outside the pool; ``query_timeout=False`` leaves its statements without a time limit."""
         try:
             await asyncio.wait_for(
                 self._direct_connection_gate.acquire(),
@@ -514,7 +522,7 @@ class KnowledgeV2PostgresBackend:
                 return await asyncpg.connect(
                     self._dsn,
                     timeout=self._acquire_timeout_seconds,
-                    command_timeout=self._query_timeout_seconds,
+                    command_timeout=self._query_timeout_seconds if query_timeout else None,
                     server_settings=server_settings,
                 )
             except TypeError:
