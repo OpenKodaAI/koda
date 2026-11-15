@@ -2,11 +2,9 @@
 
 Every table in the schema with an ``agent_id`` column is either listed in
 ``PER_AGENT_TABLES`` or in ``AGENT_ID_TABLE_EXEMPTIONS``. That covers the tables
-the migrations create and the three the runtime creates on first use in the
-same schema: ``pending_approvals`` (``koda/state/pending_approvals.py``),
-``approval_grants`` (``koda/state/approval_grants.py``) and
-``artifact_objects`` (``rust/koda-artifact-engine``).
-``tests/test_control_plane_agent_tables.py`` creates those three from their own
+the migrations create and ``artifact_objects``, which
+``rust/koda-artifact-engine`` creates on first use in the same schema.
+``tests/test_control_plane_agent_tables.py`` creates that one from its own
 DDL, enumerates the migrated schema and fails when a table is in neither list,
 so a new per-agent table cannot be forgotten by the legacy id repair or by
 agent delete.
@@ -149,9 +147,10 @@ AGENT_ID_TABLE_EXEMPTIONS: frozenset[str] = frozenset(
         "tasks",
         "trajectory_exports",
         "user_cost_totals",
-        # Created at runtime, outside the migrations, so they may not exist and
-        # the legacy id repair cannot rewrite them. Per-agent approval and
-        # artifact state: M2-E3-T3 decides whether hard delete purges them.
+        # Per-agent approval state (migration 050) and artifact state, which
+        # the artifact engine creates at runtime, outside the migrations, so it
+        # may not exist. The legacy id repair does not rewrite them; M2-E3-T3
+        # decides whether hard delete purges them.
         "approval_grants",
         "artifact_objects",
         "pending_approvals",

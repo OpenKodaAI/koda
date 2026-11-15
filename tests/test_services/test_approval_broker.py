@@ -169,3 +169,99 @@ async def test_resolve_approval_accepts_operator_response(monkeypatch):
     assert summary["decision"] == "responded"
     assert summary["response_text"] == "Use a safer path instead."
     assert approval_module._PENDING_AGENT_CMD_OPS["op-respond"]["response_text"] == "Use a safer path instead."
+
+
+@pytest.mark.asyncio
+async def test_a_dashboard_grant_for_an_op_without_agent_belongs_to_this_worker(monkeypatch):
+    """D-345: the grant is issued under the worker's agent, never 'default', so an agent named default cannot use it."""
+    import koda.config as config_module
+    from koda.agent_contract import ActionEnvelope
+    from koda.control_plane.manager import _normalize_agent_id
+    from koda.services.execution_policy import ApprovalScope
+
+    envelope = {
+        "tool_id": "file_write",
+        "integration_id": "fileops",
+        "action_id": "file_write",
+        "transport": "internal",
+        "access_level": "write",
+        "risk_class": "write",
+        "resource_scope_fingerprint": "scope-fp",
+        "params_fingerprint": "params-fp",
+    }
+    _register("op-no-agent", agent_id="")
+    approval_module._PENDING_AGENT_CMD_OPS["op-no-agent"]["requests"] = [{"envelope": envelope}]
+    monkeypatch.setattr(config_module, "AGENT_ID", "AGENT_A")
+    monkeypatch.setattr("koda.services.approval_broker._runtime_broker", lambda: None)
+
+    await resolve_approval(approval_id="op-no-agent", decision="approve")
+
+    [grant] = approval_module._PENDING_AGENT_CMD_OPS["op-no-agent"]["grants"]
+    assert grant["agent_id"] == "AGENT_A"
+    match = {
+        "user_id": 7,
+        "envelope": ActionEnvelope(**envelope),
+        "approval_scope": ApprovalScope(kind="once", ttl_seconds=600, max_uses=1),
+        "session_id": "sess-1",
+        "chat_id": 42,
+    }
+    # An agent created as "default" gets the id DEFAULT; neither spelling can use the grant.
+    assert _normalize_agent_id("default") == "DEFAULT"
+    for other_agent in ("default", "DEFAULT"):
+        assert await approval_module.consume_agent_approval_grant(agent_id=other_agent, **match) is None
+    assert await approval_module.consume_agent_approval_grant(agent_id="AGENT_A", **match) is not None
+
+
+@pytest.mark.asyncio
+async def test_a_dashboard_approval_whose_grant_is_not_saved_resolves_nothing(monkeypatch):
+    """The dashboard approver gets an error, and the request stays open to approve again."""
+    from koda.state import approval_grants
+
+    def fail(_action, _query, _params):
+        raise RuntimeError("injected fault")
+
+    _register("op-not-saved")
+    approval_module._PENDING_AGENT_CMD_OPS["op-not-saved"]["requests"] = [
+        {
+            "envelope": {
+                "tool_id": "file_write",
+                "integration_id": "fileops",
+                "action_id": "file_write",
+                "transport": "internal",
+                "access_level": "write",
+                "risk_class": "write",
+                "resource_scope_fingerprint": "scope-fp",
+                "params_fingerprint": "params-fp",
+            }
+        }
+    ]
+    monkeypatch.setattr(approval_grants, "_execute", fail)
+    monkeypatch.setattr("koda.services.approval_broker._runtime_broker", lambda: None)
+
+    with pytest.raises(approval_module.ApprovalGrantNotSavedError):
+        await resolve_approval(approval_id="op-not-saved", decision="approve")
+
+    op = approval_module._PENDING_AGENT_CMD_OPS["op-not-saved"]
+    assert op["decision"] is None and not op["event"].is_set()
+    assert approval_module._APPROVAL_GRANTS == {}
+
+
+@pytest.mark.asyncio
+async def test_the_dashboard_route_answers_503_when_the_grant_is_not_saved(monkeypatch):
+    from types import SimpleNamespace
+
+    from koda.control_plane import api
+
+    async def resolve(**_kwargs):
+        raise approval_module.ApprovalGrantNotSavedError("op-not-saved")
+
+    async def payload(_request):
+        return {"decision": "approve"}
+
+    monkeypatch.setattr("koda.services.approval_broker.resolve_approval", resolve)
+    monkeypatch.setattr(api, "_json_payload", payload)
+
+    response = await api.post_dashboard_approval_route(SimpleNamespace(match_info={"approval_id": "op-not-saved"}))
+
+    assert response.status == 503
+    assert "not saved" in response.text

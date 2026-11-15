@@ -595,6 +595,18 @@ def main() -> None:
         critical_startup_issues: list[str] = []
         noncritical_startup_issues: list[str] = []
 
+        # Postgres is the only approval store: import the JSON files earlier
+        # releases fell back to, once, and rename them *.migrated. Before task
+        # recovery: a recovered task that asks for approval loads the approval
+        # rows once, and they must include the imported ones.
+        from koda.state.approval_import import import_approval_json_files
+
+        try:
+            await import_approval_json_files()
+        except Exception:
+            noncritical_startup_issues.append("approval_json_import_error")
+            log.exception("approval_json_import_error")
+
         try:
             from koda.services.queue_manager import (
                 _stale_task_lease_janitor,

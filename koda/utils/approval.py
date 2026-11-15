@@ -40,8 +40,8 @@ from koda.state.approval_grants import (
     load_approval_grants,
     remove_approval_grant,
     remove_approval_grants,
-    replace_approval_grants,
-    save_approval_grant,
+    store_approval_grants,
+    update_approval_grant,
 )
 from koda.state.pending_approvals import (
     cleanup_expired_ops,
@@ -76,7 +76,7 @@ def check_execution_approved() -> bool:
     return _execution_approved.get()
 
 
-# Pending operations store (in-memory, lost on restart)
+# Pending operations and grants, in memory; Postgres keeps them across a restart
 
 _PENDING_OPS: dict[str, dict[str, Any]] = {}
 _APPROVAL_GRANTS: dict[str, dict[str, Any]] = {}
@@ -84,6 +84,14 @@ APPROVAL_TIMEOUT = 300  # 5 minutes
 MAX_PENDING_OPS_PER_USER = 10
 
 _persistence_loaded = False
+
+
+class ApprovalGrantNotSavedError(RuntimeError):
+    """Postgres did not store the grants of an approval, so none was issued.
+
+    Using a grant needs its row, so the caller tells the approver and leaves the
+    request open to approve again.
+    """
 
 
 async def _ensure_persistence_loaded() -> None:
@@ -125,7 +133,7 @@ async def _ensure_persistence_loaded() -> None:
                     "event": asyncio.Event(),
                     "decision": None,
                     "description": entry.get("description", ""),
-                    "agent_id": str(entry.get("agent_id") or "default"),
+                    "agent_id": str(entry.get("agent_id") or AGENT_ID or "default"),
                     "session_id": str(entry.get("session_id") or "") or None,
                     "chat_id": entry.get("chat_id"),
                     "requests": [
@@ -174,6 +182,19 @@ def _cleanup_stale_approval_grants() -> None:
     ]
     for grant_id in expired:
         _APPROVAL_GRANTS.pop(grant_id, None)
+
+
+def _spawn_store_write(write: Coroutine[Any, Any, Any]) -> None:
+    """Run a Postgres write in the background; the store logs a failure, and nothing falls back to a file."""
+
+    async def _run() -> None:
+        with contextlib.suppress(Exception):
+            await write
+
+    try:
+        asyncio.get_running_loop().create_task(_run())
+    except RuntimeError:
+        write.close()
 
 
 def _serialize_agent_approval_request(request: dict[str, Any]) -> dict[str, Any]:
@@ -277,8 +298,11 @@ async def revoke_scoped_approval_state(
     session_id: str | None,
     chat_id: int | None = None,
 ) -> None:
-    await remove_pending_ops(user_id=user_id, agent_id=agent_id, session_id=session_id, chat_id=chat_id)
-    await remove_approval_grants(user_id=user_id, agent_id=agent_id, session_id=session_id, chat_id=chat_id)
+    """Revoke the matching pending ops and grants in memory, then in Postgres.
+
+    Both Postgres deletes are tried, and then the first failure is raised to the
+    caller, so a revocation that would not survive a restart is not reported as done.
+    """
     for grant_id, grant in list(_APPROVAL_GRANTS.items()):
         if int(grant.get("user_id") or 0) != user_id:
             continue
@@ -309,6 +333,14 @@ async def revoke_scoped_approval_state(
         if chat_id is not None and int(pending.get("chat_id") or 0) != chat_id:
             continue
         _PENDING_AGENT_CMD_OPS.pop(op_id, None)
+    failures: list[Exception] = []
+    for remove in (remove_pending_ops, remove_approval_grants):
+        try:
+            await remove(user_id=user_id, agent_id=agent_id, session_id=session_id, chat_id=chat_id)
+        except Exception as exc:
+            failures.append(exc)
+    if failures:
+        raise failures[0]
 
 
 # READ/WRITE classifiers
@@ -1131,21 +1163,23 @@ async def _show_approval_keyboard(
     }
     user_data["_pending_op_id"] = op_id
 
-    # Persist to disk
-    await save_pending_op(
-        op_id,
-        {
-            "user_id": user_id,
-            "chat_id": chat_id,
-            "session_id": session_id,
-            "agent_id": agent_id,
-            "description": f"/{cmd_name} {raw_args}".strip(),
-            "op_type": "user",
-            "requests": [_serialize_agent_approval_request(item) for item in requests or []],
-            "preview_text": preview_text or "",
-        },
-        APPROVAL_TIMEOUT,
-    )
+    # Persist in Postgres so the request survives a restart. Without its row it
+    # still works in this process; the store logs the failure.
+    with contextlib.suppress(Exception):
+        await save_pending_op(
+            op_id,
+            {
+                "user_id": user_id,
+                "chat_id": chat_id,
+                "session_id": session_id,
+                "agent_id": agent_id,
+                "description": f"/{cmd_name} {raw_args}".strip(),
+                "op_type": "user",
+                "requests": [_serialize_agent_approval_request(item) for item in requests or []],
+                "preview_text": preview_text or "",
+            },
+            APPROVAL_TIMEOUT,
+        )
 
     desc = f"/{cmd_name} {raw_args}".strip()
     keyboard_rows: list[list[InlineKeyboardButton]] = [
@@ -1170,7 +1204,9 @@ async def dispatch_approved_operation(op_id: str) -> None:
     if not pending:
         return
 
-    await remove_pending_op(op_id)
+    # A row left behind expires with its TTL; the store logs the failure.
+    with contextlib.suppress(Exception):
+        await remove_pending_op(op_id)
 
     handler = pending["handler"]
     original_update = pending["update"]
@@ -1178,7 +1214,7 @@ async def dispatch_approved_operation(op_id: str) -> None:
     grants = list(pending.get("grants") or [])
     requests = list(pending.get("requests") or [])
     user_id = int(pending.get("user_id") or 0)
-    agent_id = str(pending.get("agent_id") or "").strip() or "default"
+    agent_id = str(pending.get("agent_id") or "").strip() or AGENT_ID or "default"
     session_id = str(pending.get("session_id") or "").strip() or None
     chat_id = pending.get("chat_id")
 
@@ -1199,24 +1235,28 @@ async def dispatch_approved_operation(op_id: str) -> None:
             await require_message(original_update).reply_text(refusal, parse_mode=ParseMode.HTML)
             return
 
+    # The approval's use is recorded before the operation runs (D-344).
+    if not await _consume_pending_op_grants(
+        grants=grants,
+        requests=requests,
+        user_id=user_id,
+        agent_id=agent_id,
+        session_id=session_id,
+        chat_id=int(chat_id) if chat_id is not None else None,
+    ):
+        log.warning("approved_operation_not_run", op_id=op_id, cmd=pending.get("cmd_name"), reason="grant_not_recorded")
+        await require_message(original_update).reply_text(
+            "Nao foi possivel registrar a aprovacao; a operacao nao foi executada. Tente novamente."
+        )
+        return
+
     original_user_data["_approved"] = True
     _execution_approved.set(True)
-    success = False
     try:
         await handler(original_update, original_context)
-        success = True
     finally:
         _execution_approved.set(False)
         original_user_data["_approved"] = False
-        if success:
-            _consume_pending_op_grants(
-                grants=grants,
-                requests=requests,
-                user_id=user_id,
-                agent_id=agent_id,
-                session_id=session_id,
-                chat_id=int(chat_id) if chat_id is not None else None,
-            )
 
 
 # Decorator
@@ -1393,13 +1433,11 @@ def with_approval(
                 and resolution
                 and resolution.access_level == "read"
             ):
-                _execution_approved.set(True)
-                try:
-                    result = await func(update, context, *args, **kwargs)
-                finally:
-                    _execution_approved.set(False)
-                if approval_grant is not None and requested_scope is not None:
-                    consume_agent_approval_grant(
+                # A grant's use is recorded before the command runs (D-344).
+                if (
+                    approval_grant is not None
+                    and requested_scope is not None
+                    and not await _use_approval_grant(
                         user_id=require_user_id(update),
                         agent_id=AGENT_ID or "default",
                         envelope=policy_evaluation.envelope,
@@ -1407,7 +1445,23 @@ def with_approval(
                         session_id=str(user_data.get("session_id") or "").strip() or None,
                         chat_id=_current_chat_id(update),
                     )
-                return result
+                ):
+                    await _show_approval_keyboard(
+                        update,
+                        context,
+                        command_name,
+                        raw_args,
+                        func,
+                        preview_text=policy_evaluation.preview_text,
+                        requests=approval_requests,
+                        approved_target=approved_target,
+                    )
+                    return None
+                _execution_approved.set(True)
+                try:
+                    return await func(update, context, *args, **kwargs)
+                finally:
+                    _execution_approved.set(False)
 
             if not is_write_operation(policy_command_name, policy_raw_args):
                 _execution_approved.set(True)
@@ -1426,13 +1480,11 @@ def with_approval(
                     _execution_approved.set(False)
 
             if policy_evaluation and policy_evaluation.decision == "allow":
-                _execution_approved.set(True)
-                try:
-                    result = await func(update, context, *args, **kwargs)
-                finally:
-                    _execution_approved.set(False)
-                if approval_grant is not None and requested_scope is not None:
-                    consume_agent_approval_grant(
+                # A grant's use is recorded before the command runs (D-344).
+                if (
+                    approval_grant is not None
+                    and requested_scope is not None
+                    and not await _use_approval_grant(
                         user_id=require_user_id(update),
                         agent_id=AGENT_ID or "default",
                         envelope=policy_evaluation.envelope,
@@ -1440,7 +1492,23 @@ def with_approval(
                         session_id=str(user_data.get("session_id") or "").strip() or None,
                         chat_id=_current_chat_id(update),
                     )
-                return result
+                ):
+                    await _show_approval_keyboard(
+                        update,
+                        context,
+                        command_name,
+                        raw_args,
+                        func,
+                        preview_text=policy_evaluation.preview_text,
+                        requests=approval_requests,
+                        approved_target=approved_target,
+                    )
+                    return None
+                _execution_approved.set(True)
+                try:
+                    return await func(update, context, *args, **kwargs)
+                finally:
+                    _execution_approved.set(False)
 
             # Needs approval → show keyboard, store, return
             await _show_approval_keyboard(
@@ -1493,6 +1561,12 @@ def _issue_agent_approval_grants(
     decision: str,
     issued_by_op_id: str | None = None,
 ) -> list[dict[str, Any]]:
+    """Issue one grant per approved request, once Postgres has stored them all.
+
+    Using a grant needs its row (D-344), so the rows are written before any grant is
+    in memory. When Postgres does not store them, no grant is issued and
+    :class:`ApprovalGrantNotSavedError` is raised for the caller to tell the approver.
+    """
     grants: list[dict[str, Any]] = []
     scope_kind = "approve_scope" if decision == "approved_scope" else "approve_once"
     for request in requests:
@@ -1525,13 +1599,13 @@ def _issue_agent_approval_grants(
             ),
             "scope_fingerprint": resolved_envelope.resource_scope_fingerprint,
         }
-        _APPROVAL_GRANTS[grant_id] = grant
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(save_approval_grant(grant_id, grant, ttl_seconds))
-        except RuntimeError:
-            pass
         grants.append(grant)
+    try:
+        store_approval_grants(grants)
+    except Exception as exc:
+        raise ApprovalGrantNotSavedError(issued_by_op_id or "") from exc
+    for grant in grants:
+        _APPROVAL_GRANTS[str(grant["grant_id"])] = grant
     return grants
 
 
@@ -1558,7 +1632,7 @@ def match_agent_approval_grant(
     return None
 
 
-def consume_agent_approval_grant(
+async def consume_agent_approval_grant(
     *,
     user_id: int,
     agent_id: str,
@@ -1567,6 +1641,15 @@ def consume_agent_approval_grant(
     session_id: str | None = None,
     chat_id: int | None = None,
 ) -> dict[str, Any] | None:
+    """Take one use of the matching grant; call it before the action the grant approves runs.
+
+    The use counts once Postgres records it (D-344). It is taken in memory first, so
+    no concurrent caller takes the same use, and given back if the write fails: the
+    write error is raised, and the caller must not run the action, so a grant is never
+    used more times than it allows and memory matches the database. A grant whose row
+    is gone, because it was revoked or cleaned up meanwhile, is dropped from memory as
+    well and ``None`` is returned (D-343). ``None`` also means that no grant matches.
+    """
     _cleanup_stale_approval_grants()
     for grant_id, grant in list(_APPROVAL_GRANTS.items()):
         if int(grant.get("user_id") or 0) != user_id:
@@ -1581,22 +1664,35 @@ def consume_agent_approval_grant(
             chat_id=chat_id,
         ):
             continue
-        grant["remaining_uses"] = int(grant.get("remaining_uses") or 1) - 1
-        if int(grant["remaining_uses"]) <= 0 or str(grant.get("kind") or "") == "approve_once":
+        before = int(grant.get("remaining_uses") or 1)
+        spent = before <= 1 or str(grant.get("kind") or "") == "approve_once"
+        grant["remaining_uses"] = 0 if spent else before - 1
+        try:
+            if spent:
+                kept = await remove_approval_grant(grant_id, agent_id=agent_id)
+            else:
+                kept = await update_approval_grant(grant_id, dict(grant))
+        except Exception:
+            # Give the use back unless the grant left memory meanwhile (revoked or
+            # expired); then it stays gone.
+            if _APPROVAL_GRANTS.get(grant_id) is grant:
+                grant["remaining_uses"] = before
+            raise
+        if spent or not kept:
             _APPROVAL_GRANTS.pop(grant_id, None)
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(remove_approval_grant(grant_id))
-            except RuntimeError:
-                pass
-        else:
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(replace_approval_grants(dict(_APPROVAL_GRANTS)))
-            except RuntimeError:
-                pass
+        if not kept:
+            return None
         return dict(grant)
     return None
+
+
+async def _use_approval_grant(**match: Any) -> bool:
+    """Record one use of the matching grant before its action runs; False when it cannot be used."""
+    try:
+        return await consume_agent_approval_grant(**match) is not None
+    except Exception:
+        # The store logged the failed write; the action asks for approval again.
+        return False
 
 
 def peek_agent_approval_grant(
@@ -1626,7 +1722,7 @@ def peek_agent_approval_grant(
     return None
 
 
-def _consume_pending_op_grants(
+async def _consume_pending_op_grants(
     *,
     grants: list[dict[str, Any]],
     requests: list[dict[str, Any]],
@@ -1634,23 +1730,31 @@ def _consume_pending_op_grants(
     agent_id: str,
     session_id: str | None,
     chat_id: int | None,
-) -> None:
+) -> bool:
+    """Take the use of each request's grant before the approved operation runs.
+
+    Returns False when a use could not be recorded; the operation must not run then.
+    """
     if not grants and not requests:
-        return
+        return True
     for request in requests:
         resolved_request = _deserialize_agent_approval_request(request)
         envelope = resolved_request.get("envelope")
         approval_scope = cast(ApprovalScope | None, resolved_request.get("approval_scope"))
         if not isinstance(envelope, ActionEnvelope):
             continue
-        consume_agent_approval_grant(
-            user_id=user_id,
-            agent_id=agent_id,
-            envelope=envelope,
-            approval_scope=approval_scope,
-            session_id=session_id,
-            chat_id=chat_id,
-        )
+        try:
+            await consume_agent_approval_grant(
+                user_id=user_id,
+                agent_id=agent_id,
+                envelope=envelope,
+                approval_scope=approval_scope,
+                session_id=session_id,
+                chat_id=chat_id,
+            )
+        except Exception:
+            return False
+    return True
 
 
 async def rotate_session_approval_state(
@@ -1712,8 +1816,11 @@ async def start_approval_cleanup() -> None:
         _cleanup_stale_ops()
         _cleanup_stale_agent_cmd_ops()
         _cleanup_stale_approval_grants()
-        await cleanup_expired_ops()
-        await cleanup_expired_approval_grants()
+        # The store logs a failure; the next pass tries again.
+        with contextlib.suppress(Exception):
+            await cleanup_expired_ops()
+        with contextlib.suppress(Exception):
+            await cleanup_expired_approval_grants()
 
 
 async def request_agent_cmd_approval(
@@ -1765,27 +1872,29 @@ async def request_agent_cmd_approval(
         "rationale": None,
     }
 
-    # Persist to disk
-    await save_pending_op(
-        op_id,
-        {
-            "user_id": user_id,
-            "description": description,
-            "op_type": "agent_cmd",
-            "agent_id": agent_id,
-            "session_id": session_id,
-            "chat_id": chat_id,
-            "requests": [_serialize_agent_approval_request(item) for item in requests or []],
-            "preview_text": preview_text or "",
-            "tool_id": tool_id,
-            "original_params": dict(original_params or {}),
-            "args_schema": dict(args_schema or {}),
-            "risk_class": risk_class,
-            "trace_id": trace_id,
-            "run_graph_node_id": run_graph_node_id,
-        },
-        APPROVAL_TIMEOUT,
-    )
+    # Persist in Postgres so the request survives a restart. Without its row it
+    # still works in this process; the store logs the failure.
+    with contextlib.suppress(Exception):
+        await save_pending_op(
+            op_id,
+            {
+                "user_id": user_id,
+                "description": description,
+                "op_type": "agent_cmd",
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "chat_id": chat_id,
+                "requests": [_serialize_agent_approval_request(item) for item in requests or []],
+                "preview_text": preview_text or "",
+                "tool_id": tool_id,
+                "original_params": dict(original_params or {}),
+                "args_schema": dict(args_schema or {}),
+                "risk_class": risk_class,
+                "trace_id": trace_id,
+                "run_graph_node_id": run_graph_node_id,
+            },
+            APPROVAL_TIMEOUT,
+        )
 
     keyboard = InlineKeyboardMarkup(
         [
@@ -1879,9 +1988,4 @@ def get_agent_cmd_decision(op_id: str) -> dict[str, Any] | None:
 def cleanup_agent_cmd_op(op_id: str) -> None:
     """Remove a completed agent-cmd op from the pending store."""
     _PENDING_AGENT_CMD_OPS.pop(op_id, None)
-    # Fire-and-forget persistence removal; tolerate missing event loop.
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(remove_pending_op(op_id))
-    except RuntimeError:
-        pass
+    _spawn_store_write(remove_pending_op(op_id))

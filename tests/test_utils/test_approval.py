@@ -570,6 +570,82 @@ class TestScopedApprovalRevocation:
         for grant in grants:
             assert grant["grant_id"] not in _APPROVAL_GRANTS
 
+    async def test_a_failed_request_delete_still_deletes_the_grants_then_raises(self, monkeypatch):
+        """Both Postgres deletes are tried, so a restart cannot bring the revoked grants back."""
+        from koda.utils import approval
+
+        deleted: list[dict] = []
+
+        async def remove_pending_ops(**_filters):
+            raise RuntimeError("pending_approvals_write_failed")
+
+        async def remove_approval_grants(**filters):
+            deleted.append(filters)
+            return 1
+
+        monkeypatch.setattr(approval, "remove_pending_ops", remove_pending_ops)
+        monkeypatch.setattr(approval, "remove_approval_grants", remove_approval_grants)
+
+        with pytest.raises(RuntimeError, match="pending_approvals_write_failed"):
+            await revoke_scoped_approval_state(user_id=111, agent_id="agent-a", session_id="session-1", chat_id=111)
+
+        assert deleted == [{"user_id": 111, "agent_id": "agent-a", "session_id": "session-1", "chat_id": 111}]
+
+
+def _file_delete_requests(count: int) -> list[dict]:
+    return [
+        {
+            "envelope": ActionEnvelope(
+                tool_id="file_delete",
+                integration_id="fileops",
+                action_id="file_delete",
+                transport="internal",
+                access_level="destructive",
+                risk_class="destructive",
+                resource_scope_fingerprint=f"scope-fp-{index}",
+                params_fingerprint="params-fp",
+            ),
+            "approval_scope": ApprovalScope(kind="scope", ttl_seconds=900, max_uses=3),
+        }
+        for index in range(count)
+    ]
+
+
+class TestGrantIssuanceStoresTheRowFirst:
+    """Using a grant needs its row, so a grant is stored before it is issued (D-344)."""
+
+    async def test_the_rows_are_written_before_issuance_returns(self, monkeypatch):
+        from koda.state import approval_grants
+
+        writes: list[tuple[str, tuple]] = []
+        monkeypatch.setattr(approval_grants, "_execute", lambda action, _query, params: writes.append((action, params)))
+
+        grants = _issue_agent_approval_grants(
+            user_id=111, agent_id="agent-a", requests=_file_delete_requests(2), decision="approved_scope"
+        )
+
+        # Nothing awaited since: the write did not wait for the event loop. One statement stores
+        # every grant, so either all of them are stored or none is.
+        assert [action for action, _params in writes] == ["upsert"]
+        assert {grant["grant_id"] for grant in grants} <= set(writes[0][1])
+        assert set(_APPROVAL_GRANTS) == {grant["grant_id"] for grant in grants}
+
+    async def test_a_grant_whose_row_is_not_written_is_not_issued(self, monkeypatch):
+        from koda.state import approval_grants
+        from koda.utils import approval
+
+        def fail(_action, _query, _params):
+            raise RuntimeError("injected fault")
+
+        monkeypatch.setattr(approval_grants, "_execute", fail)
+
+        with pytest.raises(approval.ApprovalGrantNotSavedError):
+            _issue_agent_approval_grants(
+                user_id=111, agent_id="agent-a", requests=_file_delete_requests(2), decision="approved_scope"
+            )
+
+        assert _APPROVAL_GRANTS == {}
+
 
 # TestOpIdEntropy
 
@@ -894,7 +970,7 @@ class TestAgentCmdApproval:
         assert grant["session_id"] == "session-1"
         assert grant["chat_id"] == 111
 
-    def test_scope_grant_matches_and_consumes_by_scope(self):
+    async def test_scope_grant_matches_and_consumes_by_scope(self):
         envelope = ActionEnvelope(
             tool_id="file_delete",
             integration_id="fileops",
@@ -926,7 +1002,7 @@ class TestAgentCmdApproval:
             is not None
         )
 
-        first = consume_agent_approval_grant(
+        first = await consume_agent_approval_grant(
             user_id=222,
             agent_id="agent-a",
             envelope=envelope,
@@ -934,7 +1010,7 @@ class TestAgentCmdApproval:
             session_id="session-1",
             chat_id=111,
         )
-        second = consume_agent_approval_grant(
+        second = await consume_agent_approval_grant(
             user_id=222,
             agent_id="agent-a",
             envelope=envelope,
@@ -942,7 +1018,7 @@ class TestAgentCmdApproval:
             session_id="session-1",
             chat_id=111,
         )
-        third = consume_agent_approval_grant(
+        third = await consume_agent_approval_grant(
             user_id=222,
             agent_id="agent-a",
             envelope=envelope,

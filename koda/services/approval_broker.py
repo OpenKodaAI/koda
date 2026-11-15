@@ -3,7 +3,7 @@
 Adapts the Telegram-native approval queue (``koda.utils.approval``) into a
 read / resolve / stream surface that the dashboard can drive. Pending
 approvals are still owned by ``koda.utils.approval`` (in-memory +
-``state.pending_approvals`` primary backend/JSON fallback). This module provides three capabilities on
+``state.pending_approvals`` in Postgres). This module provides three capabilities on
 top of that store:
 
 * ``list_pending_for_session`` — enumerate pending agent-cmd approvals
@@ -206,8 +206,10 @@ async def resolve_approval(
 
     Valid decisions include schema-driven dashboard decisions and legacy
     Telegram aliases. Returns the updated summary or raises ``KeyError`` when
-    the approval id is unknown.
+    the approval id is unknown. When Postgres does not store an approval's
+    grants, ``ApprovalGrantNotSavedError`` is raised and the approval stays open.
     """
+    import koda.config as config_module
     from koda.utils.approval import (
         _PENDING_AGENT_CMD_OPS,
         _issue_agent_approval_grants,
@@ -251,7 +253,7 @@ async def resolve_approval(
     if resolved_decision in {"approved", "approved_scope"}:
         grants = _issue_agent_approval_grants(
             user_id=int(op.get("user_id") or 0),
-            agent_id=str(op.get("agent_id") or "default"),
+            agent_id=str(op.get("agent_id") or config_module.AGENT_ID or "default"),
             session_id=str(op.get("session_id") or "").strip() or None,
             chat_id=op.get("chat_id"),
             requests=list(op.get("requests") or []),
