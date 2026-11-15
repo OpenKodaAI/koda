@@ -1057,6 +1057,37 @@ def test_dev_stack_image_adds_the_locked_dev_group_for_its_runner() -> None:
     assert "pip install --no-cache-dir -r /tmp/dev-requirements.txt" in dev_layer
 
 
+def _compose_built_image_name(service_name: str, service: dict[str, object], project: str) -> str:
+    """The tag Compose gives a service it builds: its image:, interpolated, or else <project>-<service>."""
+    image = service.get("image")
+    if image is None:
+        return f"{project}-{service_name}"
+    assert isinstance(image, str)
+    resolved = image.replace("${COMPOSE_PROJECT_NAME}", project)
+    assert "$" not in resolved, f"{image!r} uses a variable other than COMPOSE_PROJECT_NAME"
+    return resolved
+
+
+@pytest.mark.parametrize("project", ["koda", "koda-e2e"])
+def test_dev_stack_app_image_is_not_the_base_stack_image(project: str) -> None:
+    """The dev overlay's app image carries the dev group, so it must not take the base stack's tag.
+
+    Compose tags a built service <project>-<service> unless it sets image:, and it
+    does not rebuild when only a build arg changes. With one tag for both stacks,
+    a plain `docker compose up` after `pnpm dev:stack:build` would run the image
+    with pytest, pip-audit and the rest of the dev group in it.
+    """
+    base_app = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))["services"]["app"]
+    dev_app = yaml.safe_load((ROOT / "docker-compose.dev.yml").read_text(encoding="utf-8"))["services"]["app"]
+
+    base_image = _compose_built_image_name("app", base_app, project)
+    dev_image = _compose_built_image_name("app", {**base_app, **dev_app}, project)
+
+    assert dev_image != base_image
+    # One dev image per Compose project, like Compose's own default, so checkouts do not share it.
+    assert dev_image.startswith(f"{project}-")
+
+
 def _locked_runtime_closure() -> set[str]:
     """Package names the images install: koda's runtime dependencies in uv.lock, transitively, no groups."""
     lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
