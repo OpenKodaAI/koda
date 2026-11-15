@@ -3287,12 +3287,9 @@ async def _handle_plugin_install(params: dict, ctx: ToolContext) -> AgentToolRes
     from koda.skills._package import SkillPackageError, install_skill_package
 
     try:
-        result = install_skill_package(
-            path,
-            agent_id=AGENT_ID or "default",
-            review_accepted=bool(params.get("review_accepted") or params.get("approved")),
-            review_note=str(params.get("review_note") or params.get("note") or ""),
-        )
+        # The model never supplies a review: a review_required package installs only after an
+        # operator approves its package_hash through the control plane (D-031).
+        result = install_skill_package(path, agent_id=AGENT_ID or "default")
     except SkillPackageError as exc:
         error = dict(exc.error)
         scan = error.get("scan") if isinstance(error.get("scan"), dict) else {}
@@ -3368,7 +3365,17 @@ async def _handle_plugin_reload(params: dict, ctx: ToolContext) -> AgentToolResu
     from koda.skills._package import ensure_installed_package_tools_registered, get_skill_package_lock
 
     if get_skill_package_lock(AGENT_ID or "default", name):
-        ensure_installed_package_tools_registered(AGENT_ID or "default", force=True)
+        refused = ensure_installed_package_tools_registered(AGENT_ID or "default", force=True)
+        if name in refused:
+            return AgentToolResult(
+                tool="plugin_reload",
+                success=False,
+                output=(
+                    f"Plugin package '{name}' was not loaded: its files changed after approval "
+                    "(package hash mismatch). An operator must reinstall and review it."
+                ),
+                metadata={"data": {"integrity": refused[name]}, "data_format": "json"},
+            )
         return AgentToolResult(tool="plugin_reload", success=True, output=f"Plugin package '{name}' reloaded.")
     from koda.plugins import get_registry
 

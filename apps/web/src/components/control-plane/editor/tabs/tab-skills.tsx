@@ -28,6 +28,7 @@ import { MarkdownEditorField } from "@/components/control-plane/shared/markdown-
 import { SectionCollapsible } from "@/components/control-plane/shared/section-collapsible";
 import { ToggleField } from "@/components/control-plane/shared/toggle-field";
 import { ConfirmationDialog } from "@/components/control-plane/shared/confirmation-dialog";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import {
   parseCustomSkills,
   parseSkillPolicy,
@@ -36,6 +37,7 @@ import {
   type CustomSkill,
 } from "@/lib/policy-serializers";
 import {
+  buildSkillPackageInstallBody,
   parseSkillPackageLocks,
   parseSkillRegistry,
   parseSkillScanResult,
@@ -278,12 +280,7 @@ export function TabSkills() {
     try {
       await skillPackageRequest(`${packageBasePath}/install`, {
         method: "POST",
-        body: JSON.stringify({
-          path: packagePath,
-          ...(packageScan?.decision === "review_required"
-            ? { review_accepted: true, review_note: reviewNote.trim() }
-            : {}),
-        }),
+        body: JSON.stringify(buildSkillPackageInstallBody(packagePath, packageScan, reviewNote)),
       });
       setPackageScan(null);
       setReviewAccepted(false);
@@ -677,6 +674,7 @@ export function TabSkills() {
               {skillRegistryItems.slice(0, 6).map((item) => (
                 <div
                   key={`${item.package_id}-${item.package_hash}`}
+                  data-testid="skill-registry-item"
                   className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-canvas)] p-3 text-xs"
                 >
                   <div className="flex min-w-0 items-start justify-between gap-2">
@@ -692,11 +690,17 @@ export function TabSkills() {
                       {item.recommendation_status}
                     </span>
                   </div>
+                  {item.integrity.status === "modified" ? (
+                    <InlineAlert tone="danger" className="my-3 text-xs">
+                      {t("controlPlane.skillPackages.modifiedNotLoaded")}
+                    </InlineAlert>
+                  ) : null}
                   <CompactSummary
                     title={t("generated.controlPlane.registry_evidence_10be9a40")}
                     entries={[
                       ["scanner", String(item.scan_summary.decision ?? "")],
                       ["installed", String(item.installed)],
+                      ["integrity", String(item.integrity.status ?? "")],
                       ["rollback", String(item.rollback_available)],
                       ["run_graph", String(item.run_graph_evidence.node_id ?? "")],
                     ].filter((entry): entry is [string, string] => Boolean(entry[1]))}

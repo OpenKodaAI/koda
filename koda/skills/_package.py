@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import hashlib
 import json
 import re
+import sys
+import tempfile
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -43,9 +47,14 @@ _SECRET_RE = re.compile(
 )
 _VALID_PACKAGE_ID = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 _VALID_TOOL_ID = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
+# The name of a bytecode cache file Python writes into ``__pycache__``: ``<module>.<cache tag>.pyc``,
+# optionally with ``.opt-N`` before ``.pyc``. Its dotted stem cannot be imported as a module.
+_BYTECODE_CACHE_NAME = re.compile(r"^[^.]+\.[^.]+(\.opt-\d+)?\.pyc$")
 
 log = get_logger(__name__)
 _REGISTERED_PACKAGE_IDS: set[tuple[str, str]] = set()
+# (agent_id, package_id, current_package_hash) already reported as modified in this process.
+_REPORTED_MODIFIED_PACKAGES: set[tuple[str, str, str]] = set()
 
 
 class SkillPackageError(ValueError):
@@ -259,8 +268,17 @@ def install_skill_package(
     agent_id: str | None = None,
     review_accepted: bool = False,
     review_note: str = "",
+    reviewed_package_hash: str = "",
+    reviewer: str = "",
 ) -> dict[str, Any]:
-    """Install a scanned package and persist a `skill_lock.v1` payload."""
+    """Install a scanned package and persist a `skill_lock.v1` payload.
+
+    A ``review_required`` package installs only with an operator review: the
+    acceptance, a note and the ``package_hash`` the operator reviewed, which
+    must match the files being installed. Only the operator-authenticated
+    control-plane install route passes them; the model's ``plugin_install``
+    tool never does (D-031).
+    """
 
     normalized_agent = _normalize_agent_id(agent_id)
     scan = scan_skill_package(path, agent_id=normalized_agent)
@@ -280,7 +298,23 @@ def install_skill_package(
             payload={"scan": scan.to_dict()},
         )
     normalized_review_note = str(review_note or "").strip()
-    if scan.decision == "review_required" and (not review_accepted or not normalized_review_note):
+    normalized_reviewed_hash = str(reviewed_package_hash or "").strip()
+    if normalized_reviewed_hash and normalized_reviewed_hash != scan.package_hash:
+        _emit_package_metric(
+            agent_id=normalized_agent,
+            event="install_review_required",
+            decision=scan.decision,
+            recommendation_status="blocked",
+        )
+        raise SkillPackageError(
+            "skill.review_hash_mismatch",
+            "The package files changed after the review: their hash no longer matches the reviewed package_hash.",
+            category="policy_denied",
+            user_action="Scan the package again and review the new package hash.",
+            payload={"scan": scan.to_dict(), "reviewed_package_hash": normalized_reviewed_hash},
+        )
+    operator_review_accepted = bool(review_accepted and normalized_review_note and normalized_reviewed_hash)
+    if scan.decision == "review_required" and not operator_review_accepted:
         _emit_package_metric(
             agent_id=normalized_agent,
             event="install_review_required",
@@ -289,27 +323,35 @@ def install_skill_package(
         )
         raise SkillPackageError(
             "skill.policy_denied",
-            "Skill package requires explicit review before install.",
+            "Skill package requires an operator review before install.",
             category="policy_denied",
-            user_action="Review findings and retry with review_accepted=true and a review_note.",
+            user_action=(
+                "An operator must review the scanner findings and approve this package hash "
+                "in the agent's Skills tab of the control plane."
+            ),
             payload={"scan": scan.to_dict()},
         )
 
     previous_lock = get_skill_package_lock(normalized_agent, scan.package.id)
     lock = _build_lock(scan, normalized_agent, previous_lock=previous_lock)
-    if normalized_review_note:
+    if operator_review_accepted:
         lock["operator_review"] = {
             "accepted": True,
             "note": normalized_review_note,
             "accepted_at": _now_iso(),
+            "package_hash": scan.package_hash,
+            "scanner_version": scan.scanner_version,
+            "scan_decision": scan.decision,
+            "reviewer": str(reviewer or "").strip(),
         }
     lock["recommendation_status"] = _recommendation_status(lock)
     lock["trust_summary"] = _trust_summary(lock)
     lock["run_graph_evidence"] = _package_run_graph_node("skill_package.install", normalized_agent, lock)
     _persist_skill_package_lock(normalized_agent, lock)
     audit_details: dict[str, Any] = {"lock": _lock_summary(lock)}
-    if normalized_review_note:
+    if operator_review_accepted:
         audit_details["review_note"] = normalized_review_note
+        audit_details["operator_review"] = dict(lock["operator_review"])
     audit_details["run_graph_node"] = lock["run_graph_evidence"]
     _emit_package_audit("skill_package.install", normalized_agent, audit_details)
     _clear_tool_registry_cache()
@@ -352,6 +394,18 @@ def rollback_skill_package(agent_id: str | None, package_id: str) -> dict[str, A
             f"No rollback revision is available for package '{package_id}'.",
             category="non_retryable",
             user_action="Reinstall a known-good package version manually.",
+        )
+    integrity = verify_skill_package_integrity(previous)
+    if integrity["status"] != "verified":
+        raise SkillPackageError(
+            "skill.package_modified",
+            (
+                f"Package '{package_id}' version {previous.get('version') or 'unknown'} cannot be rolled back: "
+                "its files no longer match the approved package hash."
+            ),
+            category="non_retryable",
+            user_action="Reinstall the package version you want from its source, and review it again.",
+            payload={"integrity": integrity},
         )
     restored = dict(previous)
     restored["rolled_back_at"] = _now_iso()
@@ -432,6 +486,7 @@ def list_skill_registry(agent_id: str | None = None) -> dict[str, Any]:
                 "tools": [dict(item) for item in lock.get("installed_tools") or [] if isinstance(item, dict)],
                 "rollback_available": bool(lock.get("rollback_ref")),
                 "run_graph_evidence": _safe_dict(lock.get("run_graph_evidence")),
+                "integrity": verify_skill_package_integrity(lock),
             }
         )
     return {"schema_version": SKILL_REGISTRY_VERSION, "agent_id": normalized_agent, "items": items}
@@ -514,11 +569,86 @@ def get_installed_package_tool_definitions(agent_id: str | None = None) -> list[
     return definitions
 
 
-def ensure_installed_package_tools_registered(agent_id: str | None = None, *, force: bool = False) -> None:
-    """Register installed package handlers in the process plugin registry."""
+def verify_skill_package_integrity(lock: dict[str, Any]) -> dict[str, Any]:
+    """Hash the package files on disk and compare them with the approved ``package_hash`` (D-037).
 
-    if not PLUGIN_SYSTEM_ENABLED:
+    ``status`` is ``verified`` when they match and ``modified`` otherwise, including when the
+    package directory is gone or no longer passes the scanner's file checks (too many files,
+    a path escape), which would leave files outside the hash.
+    """
+
+    approved = str(lock.get("package_hash") or "")
+    raw_path = str(lock.get("package_path") or "").strip()
+    current = ""
+    findings: list[SkillScanFinding] = []
+    if raw_path and Path(raw_path).is_dir():
+        current, _ = _hash_package(Path(raw_path), findings)
+        if current != approved and not findings:
+            # Earlier releases hashed bytecode caches too. Such a lock still matches when every
+            # file, caches included, is the one that was approved.
+            legacy, _ = _hash_package(Path(raw_path), findings, include_bytecode_caches=True)
+            if legacy == approved:
+                current = legacy
+    return {
+        "status": "verified" if approved and current == approved and not findings else "modified",
+        "approved_package_hash": approved,
+        "current_package_hash": current,
+    }
+
+
+@contextlib.contextmanager
+def _source_only_imports() -> Iterator[None]:
+    """Load package code from its source files only, while the handlers are registered.
+
+    Bytecode caches are not part of the package hash, so Python must neither read a
+    ``__pycache__`` entry next to the source (one planted there would run instead of the
+    verified source) nor write one. Both settings are process-wide and restored on exit, so
+    an import package code makes later, at tool-call time, uses Python's normal cache lookup.
+    """
+
+    previous_dont_write, previous_prefix = sys.dont_write_bytecode, sys.pycache_prefix
+    with tempfile.TemporaryDirectory(prefix="koda-skill-pycache-") as empty_prefix:
+        sys.dont_write_bytecode = True
+        sys.pycache_prefix = empty_prefix
+        try:
+            yield
+        finally:
+            sys.dont_write_bytecode = previous_dont_write
+            sys.pycache_prefix = previous_prefix
+
+
+def _report_modified_package(agent_id: str, lock: dict[str, Any], integrity: dict[str, Any]) -> None:
+    package_id = str(lock.get("package_id") or "")
+    key = (agent_id, package_id, str(integrity.get("current_package_hash") or ""))
+    if key in _REPORTED_MODIFIED_PACKAGES:
         return
+    _REPORTED_MODIFIED_PACKAGES.add(key)
+    log.warning(
+        "skill_package_modified_not_loaded",
+        agent_id=agent_id,
+        package_id=package_id,
+        approved_package_hash=integrity.get("approved_package_hash"),
+        current_package_hash=integrity.get("current_package_hash"),
+    )
+    _emit_package_audit(
+        "skill_package.modified",
+        agent_id,
+        {"lock": _lock_summary(lock), "integrity": dict(integrity)},
+    )
+
+
+def ensure_installed_package_tools_registered(
+    agent_id: str | None = None, *, force: bool = False
+) -> dict[str, dict[str, Any]]:
+    """Register installed package handlers in the process plugin registry.
+
+    A package whose files no longer hash to its approved ``package_hash`` is not loaded
+    (D-037). Returns those packages, by package id, with their integrity status.
+    """
+
+    refused: dict[str, dict[str, Any]] = {}
+    if not PLUGIN_SYSTEM_ENABLED:
+        return refused
     normalized_agent = _normalize_agent_id(agent_id)
     from koda.plugins import get_registry
     from koda.plugins.registry import PluginManifest, PluginToolDef
@@ -547,6 +677,12 @@ def ensure_installed_package_tools_registered(agent_id: str | None = None, *, fo
         if not tools:
             continue
         _unregister_plugin_if_present(package_id)
+        integrity = verify_skill_package_integrity(lock)
+        if integrity["status"] != "verified":
+            _REGISTERED_PACKAGE_IDS.discard(key)
+            refused[package_id] = integrity
+            _report_modified_package(normalized_agent, lock, integrity)
+            continue
         manifest = PluginManifest(
             name=package_id,
             version=str(lock.get("version") or "0.0.0"),
@@ -557,11 +693,13 @@ def ensure_installed_package_tools_registered(agent_id: str | None = None, *, fo
             prompt_section="",
             requires={"source": "skill_package"},
         )
-        err = registry.register(manifest)
+        with _source_only_imports():
+            err = registry.register(manifest)
         if err:
             log.warning("skill_package_tool_registration_failed", package_id=package_id, error=err)
             continue
         _REGISTERED_PACKAGE_IDS.add(key)
+    return refused
 
 
 def skill_package_error_response(exc: SkillPackageError) -> dict[str, Any]:
@@ -725,13 +863,20 @@ def _normalize_manifest_tool(item: Any) -> dict[str, Any]:
     }
 
 
-def _hash_package(package_dir: Path, findings: list[SkillScanFinding]) -> tuple[str, dict[str, str]]:
+def _hash_package(
+    package_dir: Path, findings: list[SkillScanFinding], *, include_bytecode_caches: bool = False
+) -> tuple[str, dict[str, str]]:
     files = _iter_package_files(package_dir, findings)
     package_hasher = hashlib.sha256()
     file_hashes: dict[str, str] = {}
     total_bytes = 0
     for file_path in files:
         rel = _rel(package_dir, file_path)
+        if not include_bytecode_caches and _is_bytecode_cache(rel):
+            # Bytecode caches change whenever Python imports the package and are not loaded
+            # while its handlers register (see _source_only_imports), so they are not part of
+            # the approved package. Every other file under __pycache__ is.
+            continue
         try:
             content = file_path.read_bytes()
         except OSError as exc:
@@ -763,6 +908,11 @@ def _hash_package(package_dir: Path, findings: list[SkillScanFinding]) -> tuple[
             )
         )
     return package_hasher.hexdigest(), file_hashes
+
+
+def _is_bytecode_cache(rel: str) -> bool:
+    parts = Path(rel).parts
+    return len(parts) >= 2 and parts[-2] == "__pycache__" and bool(_BYTECODE_CACHE_NAME.match(parts[-1]))
 
 
 def _iter_package_files(package_dir: Path, findings: list[SkillScanFinding]) -> list[Path]:

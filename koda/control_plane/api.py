@@ -3496,7 +3496,14 @@ async def revoke_channel_gateway_identity_route(request: web.Request) -> web.Res
 def _skill_package_error_status(code: str) -> int:
     if code == "skill.validation_failed":
         return 400
-    if code in {"skill.scan_denied", "skill.policy_denied", "skill.tool_conflict", "skill.rollback_unavailable"}:
+    if code in {
+        "skill.scan_denied",
+        "skill.policy_denied",
+        "skill.review_hash_mismatch",
+        "skill.package_modified",
+        "skill.tool_conflict",
+        "skill.rollback_unavailable",
+    }:
         return 409
     return 500
 
@@ -3570,12 +3577,18 @@ async def install_skill_package_route(request: web.Request) -> web.Response:
             },
             status=400,
         )
+    # The operator review is bound to the package_hash the operator saw in the scan, and
+    # records who accepted it. The auth middleware already authenticated the operator.
+    auth = _request_auth_context(request)
+    reviewer = (auth.username or auth.email or auth.display_name or auth.auth_kind) if auth else ""
     try:
         result = install_skill_package(
             package_path,
             agent_id=request.match_info["agent_id"],
             review_accepted=bool(payload.get("review_accepted")),
             review_note=str(payload.get("review_note") or ""),
+            reviewed_package_hash=str(payload.get("package_hash") or ""),
+            reviewer=str(reviewer or ""),
         )
     except SkillPackageError as exc:
         response = skill_package_error_response(exc)

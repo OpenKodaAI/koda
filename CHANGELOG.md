@@ -127,6 +127,26 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   significant characters logs `bootstrap_code_seed_weak`. A seed the `/setup` field
   cannot take (1 to 12 characters from its alphabet) logs
   `bootstrap_code_seed_not_typeable`. (M1-E1-T17)
+- The `plugin_install` tool takes only `path`. It no longer reads `review_accepted`,
+  `approved`, `review_note` or `note`, and its error no longer tells the agent to
+  retry with them, so the model cannot accept the review of a `review_required`
+  package. Only an operator can, in the agent's Skills tab: the control-plane install
+  route now also takes the `package_hash` shown in the scan, refuses the install with
+  `skill.review_hash_mismatch` (409) when the files changed since, and records the
+  reviewer, hash, scanner version and verdict in the lock's `operator_review`.
+  (M1-E4-T3, D-031)
+- Skill package code loads only while its files still hash to the approved
+  `package_hash`. A package changed after approval is not loaded: the runtime logs
+  `skill_package_modified_not_loaded`, `plugin_reload` says the package changed, and
+  the skills registry and the Skills tab report `integrity.status: modified`. While
+  the runtime registers a package's handlers they load from their `.py` sources only,
+  never from a bytecode cache, and the package hash no longer covers the cache files
+  Python writes into `__pycache__` (`<module>.<tag>.pyc`); every other file there is
+  still hashed. A package approved by an earlier release, whose hash covered those
+  cache files too, keeps loading while every file still matches. A rollback whose
+  files no longer match its revision (an update that overwrote the same directory) is
+  refused with `skill.package_modified` (409) and asks for a reinstall.
+  (M1-E4-T11, D-037)
 
 ### Added
 

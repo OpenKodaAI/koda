@@ -10223,6 +10223,10 @@ mutableResources["en-US"].translation.controlPlane = {
     loadTitle: "Failed to load {{agentId}}",
     loadDescription: "Could not load the configuration for bot {{agentId}}.",
   },
+  skillPackages: {
+    modifiedNotLoaded:
+      "Files changed after approval, so its tools are not loaded. Reinstall the package and review it again.",
+  },
 };
 
 mutableResources["pt-BR"].translation.controlPlane = {
@@ -10252,6 +10256,10 @@ mutableResources["pt-BR"].translation.controlPlane = {
   agent: {
     loadTitle: "Falha ao carregar {{agentId}}",
     loadDescription: "Não foi possível carregar a configuração do bot {{agentId}}.",
+  },
+  skillPackages: {
+    modifiedNotLoaded:
+      "Os arquivos mudaram depois da aprovação, por isso as ferramentas dele não são carregadas. Reinstale o pacote e revise-o novamente.",
   },
 };
 
@@ -10283,6 +10291,10 @@ mutableResources["es-ES"].translation.controlPlane = {
     loadTitle: "Error al cargar {{agentId}}",
     loadDescription: "No fue posible cargar la configuración del bot {{agentId}}.",
   },
+  skillPackages: {
+    modifiedNotLoaded:
+      "Los archivos cambiaron después de la aprobación, por lo que sus herramientas no se cargan. Reinstala el paquete y revísalo de nuevo.",
+  },
 };
 
 mutableResources["fr-FR"].translation.controlPlane = {
@@ -10313,6 +10325,10 @@ mutableResources["fr-FR"].translation.controlPlane = {
     loadTitle: "Échec du chargement de {{agentId}}",
     loadDescription: "Impossible de charger la configuration du bot {{agentId}}.",
   },
+  skillPackages: {
+    modifiedNotLoaded:
+      "Les fichiers ont changé après l'approbation, ses outils ne sont donc pas chargés. Réinstallez le paquet et examinez-le à nouveau.",
+  },
 };
 
 mutableResources["de-DE"].translation.controlPlane = {
@@ -10342,6 +10358,10 @@ mutableResources["de-DE"].translation.controlPlane = {
   agent: {
     loadTitle: "{{agentId}} konnte nicht geladen werden",
     loadDescription: "Konfiguration für Bot {{agentId}} konnte nicht geladen werden.",
+  },
+  skillPackages: {
+    modifiedNotLoaded:
+      "Die Dateien wurden nach der Freigabe geändert, daher werden seine Tools nicht geladen. Installieren Sie das Paket neu und prüfen Sie es erneut.",
   },
 };
 
