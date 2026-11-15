@@ -1,6 +1,11 @@
 {
  "rows": [
   {
+   "id": "L21",
+   "at": "2026-11-15 01:40",
+   "event": "Mesclados no branch com todos os gates verdes (8196 testes Python, 274 Postgres, 1081 web): estado de erro único e saída do /sessions no celular (M8), e remoção de código morto do knowledge e catálogo MCP duplicado (M4, cerca de 4.100 linhas a menos). Onda 5 inteira e autenticação (M1-E1-T4/T14/T15) integradas num branch de integração, com gates completos rodando. No formato novo as lanes levaram de 8 a 18 minutos. 5 lanes novas iniciadas: 2 de segurança (M1-E4), dados (M2-E3) e 2 de código morto (M4-E1)"
+  },
+  {
    "id": "L20",
    "at": "2026-11-15 01:08",
    "event": "Processo mais enxuto (regra 10): cada lane roda em seu próprio workflow (o limite é de 2 agentes simultâneos por workflow, e as lanes estavam esperando umas pelas outras), uma revisão só, uma passada de correção sem nova rodada de revisão, e a suíte completa de testes só na integração. Medido: nas ondas 5 a 7, 906 min de implementação e 859 min de revisão. 6 lanes relançadas assim (ondas 7 e 8)"

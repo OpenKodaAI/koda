@@ -47,7 +47,7 @@
    "name": "Onda 5",
    "scope": "Dependências Python e Node, limites do WebSocket, changelog, processos órfãos (M1-E7-T2, T3, T11, T6, D-254)",
    "status": "in_review",
-   "ref": "task/M1-E7-*"
+   "ref": "int/w5"
   },
   {
    "wave": "W6",
@@ -73,16 +73,9 @@
   {
    "wave": "W7",
    "name": "Onda 7",
-   "scope": "Autenticação (M1-E1-T4, T5, T13, T14, T15), retenção e codecs do Postgres (M2-E5-T1, M2-E2-T4), código morto do knowledge e catálogo MCP duplicado (M4-E1-T6, T9). Rodadas de dados e código morto concluídas; pendências menores em correção antes da integração",
+   "scope": "Autenticação (M1-E1-T4, T5, T13, T14, T15), retenção e codecs do Postgres (M2-E5-T1, M2-E2-T4), código morto do knowledge e catálogo MCP duplicado (M4-E1-T6, T9). Código morto mesclado; autenticação M1-E1-T4/T14/T15 no branch de integração; dados na passada de correção; M1-E1-T5/T13 na última rodada",
    "status": "implementing",
    "ref": "task/M1-E1-*, task/M2-*, task/M4-*"
-  },
-  {
-   "wave": "W8",
-   "name": "Próxima onda",
-   "scope": "Ajustes do plano vindos do openbot.run, mais jornadas de agentes (M3), design system (M8-E5) e dados (M2)",
-   "status": "queued",
-   "ref": "após as ondas 2A e 5"
   },
   {
    "wave": "W8",
@@ -90,6 +83,13 @@
    "scope": "Rotinas de ponta a ponta (M3-E1-T3, T6, T7, T8), rótulos honestos para o que ainda não funciona (M6-E1-T2, T9, T10, M6-E3-T5, T6), saúde e confiabilidade (M7-E1-T1, T2, T4, M7-E2-T4)",
    "status": "implementing",
    "ref": "task/M3-E1-T3, task/M6-E1-T2, task/M7-E1-T1"
+  },
+  {
+   "wave": "W9",
+   "name": "Onda 9",
+   "scope": "Segurança de ferramentas e pacotes (M1-E4-T2, T3, T5, T11, T12), IDs de agente e tabelas por agente (M2-E3-T1, T2, T4), código morto (M4-E1-T1, T2, T3, T8, T10, T14)",
+   "status": "implementing",
+   "ref": "task/M1-E4-*, task/M2-E3-T1, task/M4-E1-*"
   }
  ],
  "meta": [

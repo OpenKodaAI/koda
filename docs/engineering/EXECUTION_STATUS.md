@@ -84,14 +84,16 @@ Learned from waves 2A–7 and the ADR-002 rounds. Every workflow script follows 
 
 ## Active tasks
 
-(2026-11-15 01:10 UTC. The progress tracker mirrors this list for the operator.)
+(2026-11-15 01:40 UTC. The progress tracker mirrors this list for the operator.)
 
-- WAVE-5 (`wf_94cba2c7-f62`): final reviews of round 3 (M1-E7-T3 with T11, M1-E7-T6, D-254); M1-E7-T2 approved. Merge follows as soon as it ends.
-- WAVE-6 web: M8-E5-T2 + M8-E2-T1 approved and ready to merge. M8-E1-T1..T3 fix pass `wf_8ffea544-16c` (keyboard focus hidden behind the Home command bar, faint rings, language switcher exit, one h1 on /sessions).
-- WAVE-6b (`wf_36851995-7f3`): M3-E6-T1 squads deadlock root cause with the M3-E6-T2/T3 leftovers; D-259 scheduled-job dispatch (manual and validation runs must take the job agent's policy snapshot).
-- WAVE-7 auth (`wf_d9f147a2-300`): M1-E1-T5 + T13 round 2. WAVE-7 fix passes, one lean lane each (rule 10): M2-E2-T4 + M2-E5-T1 (schema through a startup search_path instead of a run-time SQL rewriter; retention record; one report per deployment per day) `wf_babf7dde-90d`, M4-E1-T6 `wf_75e96ba1-3cd`, M1-E1-T14 bootstrap file `wf_302c9dbf-4f2`.
-- WAVE-8, one lean lane each (base f345140): M3-E1-T3/T6/T7/T8 routines `wf_be283964-996`; M6-E1-T2/T9/T10, M6-E3-T5/T6 honest labels `wf_918e8026-8ae`; M7-E1-T1/T2/T4, M7-E2-T4 health and reliability `wf_367d777a-dce`.
-- Awaiting the operator: ADR-002 OQ-1..OQ-12, and plan Q-25..Q-27 (§13 sign-off).
+- Merged on this branch with all gates green at a506f90 (pytest 8196 passed, Postgres 274 passed, web lint 0 errors, 1081 web tests, build ok): M8-E5-T2 + M8-E2-T1 (one error state, mobile exit from /sessions) and M4-E1-T6 + M4-E1-T9 (dead knowledge paths, one MCP catalog; about 4,100 lines removed).
+- Integration branch `int/w5` (937f20b): WAVE-5 M1-E7-T2, M1-E7-T3 + T11 (with the relay smoke-check fix), M1-E7-T6, D-254, and WAVE-7 M1-E1-T4/T14/T15, plus their records. Full gates running; it merges when green.
+- Lean lanes (rule 10), one workflow each:
+  - WAVE-7: M2-E2-T4 + M2-E5-T1 `wf_babf7dde-90d` (fix pass).
+  - WAVE-8: M3-E1-T3/T6/T7/T8 `wf_be283964-996`; M6-E1-T2/T9/T10, M6-E3-T5/T6 `wf_918e8026-8ae`; M7-E1-T1/T2/T4, M7-E2-T4 `wf_367d777a-dce`.
+  - WAVE-9 (base 937f20b): M1-E4-T2/T5/T12 `wf_088cf47b-ef3`; M1-E4-T3/T11 `wf_86f447cd-1f9`; M2-E3-T1/T2/T4 `wf_4e92c024-9b5`; M4-E1-T1/T10/T14 `wf_3a621325-c17`; M4-E1-T2/T3/T8 `wf_1b87f931-6b8`.
+- Old-format runs finishing their last round: WAVE-6 web M8-E1-T1..T3 fix pass `wf_8ffea544-16c`; WAVE-6b squads and scheduler `wf_36851995-7f3`; WAVE-7 auth M1-E1-T5 + T13 `wf_d9f147a2-300`.
+- Awaiting the operator: ADR-002 OQ-1..OQ-12, plan Q-25..Q-27, and on `int/w5` Q-28 (OFF-mode knowledge side effects, default applied) and Q-29 (v1.0.18 npm publish recovery).
 
 ## Pending findings for the plan (verified by the orchestrator)
 
