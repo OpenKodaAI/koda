@@ -94,9 +94,9 @@
   {
    "wave": "W10",
    "name": "Onda 10",
-   "scope": "Infraestrutura de testes (M0-E2-T4, T5, mesclados no lote 4), guias de contribuição (M10-E1-T2, lote 5) e um único redator com padrões em tempo linear (M5-E3-T8, aprovado para o lote 6)",
-   "status": "final_review",
-   "ref": "2e317f4, e4091eb, task/M5-E3-T8"
+   "scope": "Infraestrutura de testes (M0-E2-T4, T5), guias de contribuição (M10-E1-T2) e um único redator em tempo linear (M5-E3-T8). Tudo mesclado",
+   "status": "merged",
+   "ref": "2e317f4, e4091eb, 1f6697c"
   },
   {
    "wave": "W11",
@@ -108,16 +108,23 @@
   {
    "wave": "W12",
    "name": "Onda 12",
-   "scope": "Segurança: uso único de códigos e um só dono (D-283..D-285, D-294, D-295), integridade de pacotes de skill (D-292, D-291), autorização de squads (M1-E5-T1, T4, D-304, D-306), OAuth, isolamento MCP e pareamento (M1-E3-T6, M1-E4-T6, M1-E5-T3), /cancel no Postgres (D-293); funcionalidades M6 (M6-E3-T2, T4, M6-E1-T5, T8). Limites do prompt MCP (D-269, D-270, D-273) mesclados no lote 5. Tudo aprovado para o lote 6",
-   "status": "final_review",
-   "ref": "e4091eb (D-269); task/SEC-D283, task/SEC-D294, task/SEC-D292, task/M1-E5-T1, task/SQ-D304, task/M1-E3-T6, task/M6-E3-T2, task/FIX-D293"
+   "scope": "Segurança: uso único de códigos e um só dono (D-283..D-285, D-294, D-295), integridade de pacotes de skill (D-292, D-291), autorização de squads (M1-E5-T1, T4, D-304, D-306), OAuth, isolamento MCP e pareamento (M1-E3-T6, M1-E4-T6, M1-E5-T3), /cancel no Postgres (D-293); funcionalidades M6 (M6-E3-T2, T4, M6-E1-T5, T8). Limites do prompt MCP (D-269, D-270, D-273) mesclados no lote 5. Tudo mesclado no lote 6",
+   "status": "merged",
+   "ref": "e4091eb (lote 5), 1f6697c (lote 6)"
   },
   {
    "wave": "W13",
    "name": "Onda 13",
-   "scope": "Ambiente MCP mínimo e validação das restrições (D-300, D-301); configurações de provedor honestas (D-296, D-297, D-298); isolamento do diretório de runtime nos testes e Escape no editor de rotinas (D-276, D-277)",
+   "scope": "Ambiente MCP mínimo e validação das restrições (D-300, D-301) e provedores honestos (D-296..D-298), mesclados no lote 6; diretório de runtime isolado nos testes e Escape no editor de rotinas (D-276, D-277), aprovados para o lote 7",
+   "status": "final_review",
+   "ref": "1f6697c, task/FIX-D276"
+  },
+  {
+   "wave": "W14",
+   "name": "Onda 14",
+   "scope": "Segurança: restrições MCP validadas também na partida e caminhos de teste do painel com o sandbox (D-316..D-318, D-321); scanner de pacotes cobre rotas de execução fora do import e aliases (D-309..D-311, D-323). Squads: pausa por orçamento e por operador, reenvio de reivindicações expiradas (M3-E6-T5, D-287). Design: tokens definidos e contraste do texto (M8-E5-T3, D-267), erros ARIA críticos da paleta (D-282)",
    "status": "implementing",
-   "ref": "task/SEC-D300, task/M6-D296, task/FIX-D276"
+   "ref": "task/SEC-D316, task/SEC-D321, task/SEC-D311, task/SEC-D323, task/M3-E6-T5, task/M8-E5-T3"
   }
  ],
  "meta": [
