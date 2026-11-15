@@ -18,7 +18,8 @@ Minimum request fields:
 - `goal`: short child objective.
 - `prompt`: full child brief.
 - `tasks[]`: optional fan-out list; singular calls remain supported.
-- `target_agent_id?`: optional control-plane agent prompt/profile.
+- `target_agent_id?`: optional; when set it must name the parent's own agent,
+  since a child run never acts as another agent (`subagent.policy_denied`).
 - `toolset`: defaults to `read_only`; Phase 3 allows `read_only`, `analysis`,
   and `research`.
 - `timeout_seconds`: default 180, capped at 600.
@@ -63,6 +64,17 @@ Default local/dev limits:
 
 Child-runs do not relax parent policy. The runtime applies normal ToolRegistry,
 ExecutionPolicy, approval, sandbox, MCP risk, audit, and runtime event paths.
+
+A child's capabilities are a subset of its parent's. At spawn the child gets
+the parent's capability envelope: the parent's agent, its core tool allowlist
+(less `task`) and its task kind. The child acts as the parent's agent, so its
+workspace, inbox, squad access, approval grants and memory scope are the
+parent's. A core tool outside the envelope is denied before the policy gate
+(`child_run_capability_denied`), and a child run without an envelope gets no
+tools. The child is judged by the parent's task kind, so execution-policy rules
+keyed on it bind the child too. Memory writes and sensitive recall are never
+granted: the normalized context policy carries neither, whatever the request
+asks for.
 Phase 3 fails closed for write, network-write, destructive, unknown, or
 unrecognized child toolsets until a stricter approval path is implemented.
 
