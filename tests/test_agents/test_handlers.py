@@ -248,15 +248,108 @@ async def test_list_agents_empty(ctx: ToolContext, monkeypatch: pytest.MonkeyPat
     assert "No agents" in result.output
 
 
+class _ParticipantStore:
+    def __init__(self, agent_ids: list[str]) -> None:
+        self.agent_ids = agent_ids
+        self.calls: list[dict[str, object]] = []
+
+    async def list_participants(self, **kwargs: object) -> list[object]:
+        from types import SimpleNamespace
+
+        self.calls.append(dict(kwargs))
+        return [SimpleNamespace(agent_id=agent_id) for agent_id in self.agent_ids]
+
+
 @pytest.mark.asyncio
-async def test_broadcast_success(ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_broadcast_requires_a_squad_thread(ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
     mock_bus = AsyncMock()
-    mock_bus.broadcast = AsyncMock(return_value=3)
     with patch("koda.agents.get_message_bus", return_value=mock_bus):
         result = await _handle_agent_broadcast({"message": "update"}, ctx)
-    assert result.success
-    assert "3" in result.output
+    assert not result.success
+    assert "squad thread" in result.output
+    mock_bus.broadcast.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_broadcast_reaches_only_the_current_thread_participants(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from koda.agents.message_bus import InMemoryMessageBus
+
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    ctx.squad_thread_id = "thread-1"
+    ctx.executing_agent_id = "LEAD"
+    bus = InMemoryMessageBus()
+    bus._ensure_inbox("OTHER_WORKSPACE_AGENT")  # known to the bus, not in this thread
+    store = _ParticipantStore(["LEAD", "WORKER", "REVIEWER", "system", "user:42", "operator:alice"])
+    with (
+        patch("koda.agents.get_message_bus", return_value=bus),
+        patch("koda.squads.get_squad_thread_store", return_value=store),
+    ):
+        result = await _handle_agent_broadcast({"message": "update"}, ctx)
+    assert result.success, result.output
+    assert "2" in result.output
+    assert store.calls == [{"thread_id": "thread-1", "active_only": True}]
+    for agent_id in ("WORKER", "REVIEWER"):
+        msg = await bus.receive(agent_id, timeout=0.1)
+        assert msg is not None
+        assert (msg.from_agent, msg.thread_id, msg.content) == ("LEAD", "thread-1", "update")
+    assert await bus.receive("OTHER_WORKSPACE_AGENT", timeout=0.05) is None
+    assert {item["agent_id"] for item in bus.list_agents()} == {"OTHER_WORKSPACE_AGENT", "WORKER", "REVIEWER"}
+
+
+@pytest.mark.asyncio
+async def test_broadcast_carries_the_squad_task_and_delegation_chain(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from koda.agents.message_bus import InMemoryMessageBus
+
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    ctx.squad_thread_id = "thread-1"
+    ctx.executing_agent_id = "LEAD"
+    ctx.squad_task_id = "task-7"
+    ctx.parent_message_id = "msg-41"
+    ctx.delegation_chain = ["ORIGIN"]
+    bus = InMemoryMessageBus()
+    with (
+        patch("koda.agents.get_message_bus", return_value=bus),
+        patch("koda.squads.get_squad_thread_store", return_value=_ParticipantStore(["LEAD", "WORKER"])),
+    ):
+        result = await _handle_agent_broadcast({"message": "update"}, ctx)
+    assert result.success, result.output
+    msg = await bus.receive("WORKER", timeout=0.1)
+    assert msg is not None
+    assert msg.metadata == {
+        "thread_id": "thread-1",
+        "kind": "agent_text",
+        "squad_task_id": "task-7",
+        "parent_message_id": "msg-41",
+        "delegation_chain": ["ORIGIN"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_broadcast_requires_write_access_to_the_thread(ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    from koda.squads.access import SquadAccessError
+
+    class _DenyingAccess(_FakeSquadAccess):
+        async def require_thread_access(self, **_: object) -> _FakeThreadAccess:
+            raise SquadAccessError("agent 'LEAD' is not a participant")
+
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    ctx.squad_thread_id = "thread-1"
+    ctx.executing_agent_id = "LEAD"
+    mock_bus = AsyncMock()
+    with (
+        patch("koda.squads.get_squad_access_service", return_value=_DenyingAccess()),
+        patch("koda.agents.get_message_bus", return_value=mock_bus),
+        patch("koda.squads.get_squad_thread_store", return_value=_ParticipantStore(["WORKER"])),
+    ):
+        result = await _handle_agent_broadcast({"message": "update"}, ctx)
+    assert not result.success
+    assert "Forbidden" in result.output
+    mock_bus.broadcast.assert_not_awaited()
 
 
 @pytest.mark.asyncio

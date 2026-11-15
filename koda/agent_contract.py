@@ -551,7 +551,7 @@ _CORE_TOOL_DEFINITIONS: tuple[CoreToolDefinition, ...] = (
         "agent_broadcast",
         "Agent broadcast",
         "agent_comm",
-        "Broadcast a message to all known agents.",
+        "Broadcast a message to every participant of the current squad thread.",
         feature_flag="inter_agent",
     ),
     CoreToolDefinition(

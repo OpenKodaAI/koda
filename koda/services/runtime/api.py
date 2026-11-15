@@ -9,7 +9,7 @@ import mimetypes
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import quote
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from aiohttp import WSMsgType, web
 
@@ -248,18 +248,77 @@ def _latest_browser_preview_path(task_id: int) -> Path | None:
     return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
+# The browser payload is built from these names only, so free-form kernel or session ``metadata``
+# and any key the kernel adds later never reach a browser (M3-E8-T4). They are the browser state
+# fields the dashboard types (``RuntimeBrowserState`` in apps/web) other than the process ids and
+# ``novnc_url``, and the text diagnostics, which pass unchanged; ``runtime_dir`` is added relative
+# to the task's runtime directory.
+_BROWSER_FIELDS = (
+    "scope_id",
+    "transport",
+    "status",
+    "last_known_status",
+    "display_id",
+    "vnc_port",
+    "novnc_port",
+    "missing_binaries",
+    "visual_available",
+    "session_persisted_only",
+    "unavailable_reason",
+    "kernel_error",
+    "last_title",
+)
+# The typed columns of a browser session row; its ``metadata`` is not forwarded.
+_BROWSER_SESSION_FIELDS = (
+    "id",
+    "task_id",
+    "env_id",
+    "scope_id",
+    "transport",
+    "status",
+    "display_id",
+    "vnc_port",
+    "novnc_port",
+    "created_at",
+    "updated_at",
+    "ended_at",
+)
+
+
+def _task_relative_path(path: object, task_root: Path) -> str | None:
+    """``path`` relative to the task's runtime directory, or None when it is empty or outside it."""
+    if not path:
+        return None
+    try:
+        return Path(str(path)).resolve().relative_to(task_root.resolve()).as_posix()
+    except ValueError:
+        return None
+
+
+def _task_runtime_root(task_id: int) -> Path:
+    return Path(get_runtime_controller().runtime_root) / "tasks" / str(task_id)
+
+
 def _browser_payload(task_id: int) -> dict[str, object]:
     controller = get_runtime_controller()
-    browser = dict(controller.get_browser_snapshot(task_id))
+    task_root = _task_runtime_root(task_id)
+    snapshot = controller.get_browser_snapshot(task_id)
+    browser: dict[str, object] = {key: snapshot[key] for key in _BROWSER_FIELDS if key in snapshot}
+    if "runtime_dir" in snapshot:
+        browser["runtime_dir"] = _task_relative_path(snapshot["runtime_dir"], task_root)
     preview_path = _latest_browser_preview_path(task_id)
     browser["screenshot_url"] = f"/api/runtime/tasks/{task_id}/browser/screenshot"
     browser["preview_url"] = str(browser["screenshot_url"])
     browser["preview_available"] = preview_path is not None or (
-        bool(browser) and not bool(browser.get("session_persisted_only"))
+        bool(snapshot) and not bool(snapshot.get("session_persisted_only"))
     )
     if preview_path is not None:
-        browser["preview_path"] = str(preview_path)
+        browser["preview_path"] = _task_relative_path(preview_path, task_root)
     return browser
+
+
+def _browser_session_rows(sessions: list[dict[str, Any]]) -> list[dict[str, object]]:
+    return [{key: row[key] for key in _BROWSER_SESSION_FIELDS if key in row} for row in sessions]
 
 
 async def _runtime_queues(request: web.Request) -> web.Response:
@@ -353,9 +412,10 @@ async def _runtime_schedule_detail(request: web.Request) -> web.Response:
         return auth
     job_id = int(request.match_info["job_id"])
     run_limit = _parse_positive_int(request.query.get("run_limit"), name="run_limit", default=25, maximum=100)
+    run_offset_name = "run_offset" if request.query.get("run_offset") else "offset"
     run_offset = _parse_positive_int(
-        request.query.get("run_offset") or request.query.get("offset"),
-        name="run_offset",
+        request.query.get(run_offset_name),
+        name=run_offset_name,
         default=0,
         minimum=0,
         maximum=100_000,
@@ -799,6 +859,12 @@ async def _runtime_task_detail(request: web.Request) -> web.Response:
     from koda.knowledge.presentation import redact_runtime_knowledge_payload
 
     environment = controller.store.get_environment_by_task(task_id)
+    environment_payload = dict(environment) if environment else environment
+    if environment_payload and "runtime_dir" in environment_payload:
+        # The dashboard gets the task-relative directory, never the host path (M3-E8-T4).
+        environment_payload["runtime_dir"] = _task_relative_path(
+            environment_payload["runtime_dir"], _task_runtime_root(task_id)
+        )
     list_events = getattr(controller.store, "list_events", None)
     runtime_events = list_events(task_id=task_id, after_seq=0) if callable(list_events) else []
     run_graph_payload: dict[str, object] | None = None
@@ -871,7 +937,7 @@ async def _runtime_task_detail(request: web.Request) -> web.Response:
     return web.json_response(
         {
             "task": task,
-            "environment": environment,
+            "environment": environment_payload,
             "runtime_kernel": runtime_kernel_snapshot,
             "warnings": controller.store.list_warnings(task_id),
             "guardrails": controller.list_guardrail_hits(task_id),
@@ -1057,7 +1123,7 @@ async def _runtime_task_browser(request: web.Request) -> web.Response:
     return web.json_response(
         {
             "browser": _browser_payload(task_id),
-            "sessions": controller.store.list_browser_sessions(task_id),
+            "sessions": _browser_session_rows(controller.store.list_browser_sessions(task_id)),
         }
     )
 
@@ -1307,7 +1373,9 @@ async def _runtime_task_sessions(request: web.Request) -> web.Response:
     if auth:
         return auth
     task_id = int(request.match_info["task_id"])
-    return web.json_response(get_runtime_controller().list_sessions(task_id))
+    sessions = dict(get_runtime_controller().list_sessions(task_id))
+    sessions["browser_sessions"] = _browser_session_rows(sessions.get("browser_sessions") or [])
+    return web.json_response(sessions)
 
 
 async def _runtime_stream_sse(request: web.Request) -> web.StreamResponse:
@@ -1394,7 +1462,13 @@ async def _runtime_terminal_ws(request: web.Request) -> web.WebSocketResponse:
         raise web.HTTPForbidden(text="invalid terminal attach session")
     controller = get_runtime_controller()
     can_write = bool(int(session.get("can_write") or 0))
-    after_offset = int(request.query.get("after_offset", "0"))
+    after_offset = _parse_positive_int(
+        request.query.get("after_offset"),
+        name="after_offset",
+        default=0,
+        minimum=0,
+        maximum=_MAX_RUNTIME_ID,
+    )
     terminal_row = next(
         (item for item in controller.store.list_terminals(task_id) if int(item["id"]) == terminal_id),
         None,
@@ -1607,10 +1681,37 @@ async def _runtime_send_session_message(request: web.Request) -> web.Response:
             except (TypeError, ValueError):
                 return None
 
-        explicit_user_id = optional_int(squad_payload.get("user_id"))
-        explicit_chat_id = optional_int(squad_payload.get("chat_id") or squad_payload.get("telegram_chat_id"))
-        user_id = explicit_user_id or _dashboard_actor_id(namespace="squad-user", session_id=session_id)
-        chat_id = explicit_chat_id or -_dashboard_actor_id(namespace="squad-chat", session_id=session_id)
+        # The identity the task runs as comes from the thread, never from the
+        # caller: a mutate token must not pick another user's memory or chat.
+        from koda.squads import get_squad_thread_store
+
+        thread_store = get_squad_thread_store()
+        if thread_store is None:
+            return web.json_response({"error": "squad thread store is unavailable"}, status=503)
+        try:
+            UUID(squad_thread_id)
+        except ValueError:
+            return web.json_response({"error": "squad.thread_id is invalid"}, status=400)
+        thread = await thread_store.get_thread(squad_thread_id)
+        if thread is None:
+            return web.json_response({"error": f"thread {squad_thread_id} not found"}, status=404)
+        user_id = int(thread.owner_user_id or 0) or _dashboard_actor_id(namespace="squad-user", session_id=session_id)
+        chat_id = int(thread.telegram_chat_id or 0) or -_dashboard_actor_id(
+            namespace="squad-chat", session_id=session_id
+        )
+        # A caller identity that differs from the thread's is dropped, and the caller is told so.
+        ignored = [
+            f"squad.{name}"
+            for name, used in (("user_id", user_id), ("chat_id", chat_id), ("telegram_chat_id", chat_id))
+            if str(squad_payload.get(name) or "").strip() and optional_int(squad_payload.get(name)) != used
+        ]
+        if ignored:
+            log.warning(
+                "squad_message_identity_ignored",
+                thread_id=squad_thread_id,
+                session_id=session_id,
+                ignored=ignored,
+            )
         chain_raw = squad_payload.get("delegation_chain")
         delegation_chain = [str(item) for item in chain_raw] if isinstance(chain_raw, list) else []
         target_agent_id = str(squad_payload.get("target_agent_id") or AGENT_ID or "default").strip() or "default"
@@ -1645,6 +1746,7 @@ async def _runtime_send_session_message(request: web.Request) -> web.Response:
                 "session_id": session_id,
                 "task_id": task_id,
                 "squad_thread_id": squad_thread_id,
+                "ignored": ignored,
             },
             status=202,
         )

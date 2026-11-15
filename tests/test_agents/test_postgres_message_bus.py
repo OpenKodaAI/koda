@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from collections.abc import AsyncIterator
 from contextlib import suppress
@@ -388,13 +389,51 @@ async def test_a_delegation_request_persists_its_chain(monkeypatch: pytest.Monke
 
 @pytest.mark.postgres
 @pytest.mark.asyncio
-async def test_broadcast_skips_sender_and_excluded(bus_factory) -> None:  # type: ignore[no-untyped-def]
+async def test_broadcast_reaches_only_thread_participants(bus_factory, clean_squad_messages: str) -> None:  # type: ignore[no-untyped-def]
+    import asyncpg  # type: ignore[import-not-found]
+
     seed = bus_factory()
-    # Make three agents observable by inserting any message touching them.
-    await seed.send("a", "b", "seed-1")
-    await seed.send("c", "d", "seed-2")
-    await seed.send("a", "c", "seed-3")
+    # Agents from other threads and workspaces, and pseudo-agents, are known to
+    # ``squad_messages``; a broadcast must not reach any of them.
+    await seed.send("other-workspace-agent", "b", "seed-1")
+    await seed.send("system", "user:42", "seed-2")
+    await seed.send("operator:alice", "c", "seed-3")
     bus = bus_factory()
-    count = await bus.broadcast("a", "ping", exclude={"d"})
-    # Known agents: a, b, c, d. Exclude {a (sender), d}. Should reach b and c.
+    thread_id = "00000000-0000-4000-8000-000000000040"
+    count = await bus.broadcast(
+        "a",
+        "ping",
+        exclude={"d"},
+        thread_id=thread_id,
+        recipients=["a", "b", "c", "d", "system", "user:42", "operator:alice", ""],
+    )
+    # Sender a and excluded d are skipped, and pseudo-agents are never recipients.
     assert count == 2
+    conn = await asyncpg.connect(clean_squad_messages)
+    try:
+        # One thread message for all recipients, so the transcript shows the broadcast once.
+        rows = await conn.fetch(
+            f"""SELECT id, to_agent, to_agent_ids, thread_id::text AS thread_id
+                  FROM "{_schema()}"."squad_messages"
+                 WHERE content = 'ping'"""
+        )
+        recipients = await conn.fetch(
+            f'''SELECT message_id, to_agent_id FROM "{_schema()}"."squad_message_recipients"
+                 WHERE message_id = ANY($1::bigint[]) ORDER BY to_agent_id''',
+            [row["id"] for row in rows],
+        )
+    finally:
+        await conn.close()
+    assert len(rows) == 1
+    assert (rows[0]["to_agent"], rows[0]["thread_id"]) == (None, thread_id)
+    to_agent_ids = rows[0]["to_agent_ids"]
+    assert (json.loads(to_agent_ids) if isinstance(to_agent_ids, str) else to_agent_ids) == ["b", "c"]
+    assert [(row["message_id"], row["to_agent_id"]) for row in recipients] == [
+        (rows[0]["id"], "b"),
+        (rows[0]["id"], "c"),
+    ]
+    for agent_id in ("b", "c"):
+        # Each recipient's inbox holds its seed message, then the broadcast.
+        inbox = await bus.receive_batch(agent_id, limit=10, timeout=3)
+        broadcast = [msg for msg in inbox if msg.content == "ping"]
+        assert [(msg.thread_id, msg.metadata["kind"]) for msg in broadcast] == [(thread_id, "agent_text")]

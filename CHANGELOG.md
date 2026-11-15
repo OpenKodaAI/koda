@@ -293,6 +293,18 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   can no longer open a private thread it is not in, squad sync never adds members to a
   private thread, and break-glass access is refused when its audit event cannot be written.
   (M1-E5-T1, M1-E5-T4, D-038, D-041, D-304, D-306)
+- `agent_broadcast` reaches only the active participants of the current squad thread, needs
+  write access to that thread, and tags each message with the thread, the sender's squad
+  task and its delegation chain. It never reaches the `system`, `user:*` or `operator:*`
+  pseudo-agents (an agent named `SYSTEM` or `OPERATOR` is still reached) or agents of other
+  threads and workspaces; outside a squad thread it is refused. On Postgres a broadcast is
+  one thread message with all its recipients, so the squad room shows it once. A squad
+  message sent to the runtime API runs as the thread's owner and chat, not as a `user_id`
+  or `chat_id` the caller supplies; the response lists such a field under `ignored` and
+  the runtime logs it. The memory engine refuses a recall without a positive `user_id`
+  instead of returning every user's memories, and the runtime refuses such a recall before
+  it calls the engine, with `MemoryRecallUserRequiredError` and a
+  `memory_recall_user_required` log line. (M1-E5-T2, D-040, D-134, D-137)
 - A skill package that runs code through a route the verified-bytes check does not cover
   (`runpy.run_path`, `compile`, `exec` or `eval` through builtins, `source_to_code`,
   `marshal` or `pickle`, a loader of its own, another interpreter through `os.exec*`,
@@ -509,6 +521,17 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   early or late. A stored grant without an agent gets the one agent its request,
   session or chat names, or expires with an `approval.grant_expired` audit event.
   (M2-E1-T1, D-059, D-060, D-347)
+- The runtime API answers a non-numeric `after_offset` on the terminal WebSocket with `400`
+  instead of `500`, and a bad `offset` on a schedule detail names `offset` in its error. The
+  browser payload (`GET .../browser`, `POST .../attach/browser`, the browser WebSocket's
+  snapshots and the browser session rows of `GET .../sessions`) carries only named fields:
+  the kernel's and the session's free-form `metadata`, with its `*_log` file paths, and any
+  key the kernel adds later are no longer sent in these payloads. Its `runtime_dir`, like
+  the task environment's `runtime_dir`, is relative to the task's runtime directory
+  (`browser`, or `.` for the directory itself) or `null` outside it, never an absolute host
+  path. A page title or error that starts with `/` is kept. Runtime events are not
+  projected: a `browser.started` event on the event routes still carries the whole
+  session, including its `metadata` log paths and absolute `runtime_dir`. (M3-E8-T4)
 - Automatic and web-created scheduled jobs run. Every reminder, interval and cron run
   used to be blocked as "policy snapshot is missing". Migration 047 adds the scheduler
   events table and the dispatch and validation columns that a real Postgres database

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -21,6 +22,29 @@ MessageKind = Literal[
     "system_event",
     "text",
 ]
+
+
+# Senders and principals that write to ``squad_messages`` but own no inbox. They are
+# lower-case; agent ids are upper-case, so an agent named ``SYSTEM`` is a real agent.
+_PSEUDO_AGENT_IDS = frozenset({"system", "operator", "squad_router", "user"})
+
+
+def is_pseudo_agent(agent_id: str | None) -> bool:
+    """True for ids that name no agent: router and system senders, and ``user:*``/``operator:*`` principals."""
+    value = str(agent_id or "").strip()
+    return not value or ":" in value or value in _PSEUDO_AGENT_IDS
+
+
+def broadcast_recipients(from_agent: str, recipients: Iterable[str], exclude: set[str] | None = None) -> list[str]:
+    """The agents a thread broadcast reaches: the given participants, never the sender or a pseudo-agent."""
+    skip = set(exclude or set()) | {from_agent}
+    selected: list[str] = []
+    for raw in recipients:
+        agent_id = str(raw or "").strip()
+        if agent_id in skip or agent_id in selected or is_pseudo_agent(agent_id):
+            continue
+        selected.append(agent_id)
+    return selected
 
 
 def _kind_from_legacy(message_type: str) -> str:

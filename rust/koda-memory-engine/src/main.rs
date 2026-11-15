@@ -1012,8 +1012,21 @@ fn dynamic_struct_from_json(value: &Value) -> DynamicStruct {
     DynamicStruct { fields }
 }
 
+/// Recall is always scoped to one user: a missing or non-positive id would match every user's memories.
+#[allow(clippy::result_large_err)]
+fn recall_user_id(context: Option<&RecallContext>) -> Result<i64, Status> {
+    let user_id = context.map(|item| item.user_id).unwrap_or_default();
+    if user_id <= 0 {
+        return Err(Status::invalid_argument(
+            "recall requires a positive context.user_id",
+        ));
+    }
+    Ok(user_id)
+}
+
 async fn load_recall_rows(
     agent_id: &str,
+    user_id: i64,
     limit: u32,
     context: Option<&RecallContext>,
 ) -> Result<Vec<Value>, Status> {
@@ -1021,7 +1034,6 @@ async fn load_recall_rows(
         .await?
         .connection(PostgresWorkload::Read, "memory recall")
         .await?;
-    let user_id = context.map(|item| item.user_id).unwrap_or_default();
     let memory_types = context
         .map(|item| item.memory_types.clone())
         .unwrap_or_default();
@@ -1058,7 +1070,7 @@ async fn load_recall_rows(
             r#"
             {MEMORY_SELECT_SQL}
             WHERE n.agent_id = $1
-              AND ($2::BIGINT = 0 OR n.user_id = $2)
+              AND n.user_id = $2::BIGINT
               AND (CARDINALITY($3::TEXT[]) = 0 OR n.memory_type = ANY($3::TEXT[]))
               AND ($4::TEXT = '' OR COALESCE(n.project_key, '') = $4 OR COALESCE(n.project_key, '') = '')
               AND ($5::TEXT = '' OR COALESCE(n.environment, '') = $5 OR COALESCE(n.environment, '') = '')
@@ -2871,8 +2883,14 @@ impl MemoryEngineService for MemoryServer {
             .iter()
             .map(|item| item.to_ascii_lowercase())
             .collect::<HashSet<String>>();
-        let recall_rows =
-            load_recall_rows(&request.agent_id, request.limit, request.context.as_ref()).await?;
+        let user_id = recall_user_id(request.context.as_ref())?;
+        let recall_rows = load_recall_rows(
+            &request.agent_id,
+            user_id,
+            request.limit,
+            request.context.as_ref(),
+        )
+        .await?;
         let mut ranked_rows: BTreeMap<i64, (Value, String, String, f64)> = BTreeMap::new();
         for row in recall_rows {
             let memory_id = row_i64(&row, "id");
@@ -3416,6 +3434,22 @@ mod tests {
                 "{error}"
             );
             assert!(error.contains("docs/operations/hardening.md"), "{error}");
+        }
+    }
+
+    #[test]
+    fn recall_requires_a_positive_user_id() {
+        use koda_proto::memory::v1::RecallContext;
+
+        let context = |user_id: i64| RecallContext {
+            user_id,
+            ..RecallContext::default()
+        };
+        assert_eq!(super::recall_user_id(Some(&context(42))).unwrap(), 42);
+        for rejected in [None, Some(context(0)), Some(context(-7))] {
+            let status = super::recall_user_id(rejected.as_ref())
+                .expect_err("recall without a positive user_id must be refused");
+            assert_eq!(status.code(), tonic::Code::InvalidArgument);
         }
     }
 
