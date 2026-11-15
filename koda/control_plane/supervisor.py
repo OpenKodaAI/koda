@@ -509,7 +509,8 @@ class ControlPlaneSupervisor:
                 failures = 0
                 failure_kind = ""
             delay = min(
-                CONTROL_PLANE_POLL_INTERVAL_SECONDS * (2**failures),
+                # The exponent is capped: float * 2**1024 overflows and would end the loop.
+                CONTROL_PLANE_POLL_INTERVAL_SECONDS * (2 ** min(failures, 16)),
                 max(_RECONCILE_BACKOFF_MAX_SECONDS, CONTROL_PLANE_POLL_INTERVAL_SECONDS),
             )
             await self._wait_for_next_reconcile(delay)

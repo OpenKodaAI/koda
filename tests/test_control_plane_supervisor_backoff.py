@@ -63,6 +63,21 @@ async def test_reconcile_backs_off_exponentially_while_the_kernel_is_down(monkey
 
 
 @pytest.mark.asyncio
+async def test_a_very_long_outage_keeps_waiting_at_the_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Past 1024 failures ``float * 2**failures`` would overflow and end the loop."""
+    monkeypatch.setattr(supervisor_mod, "CONTROL_PLANE_POLL_INTERVAL_SECONDS", 5.0)
+    monkeypatch.setattr(supervisor_mod, "_RECONCILE_BACKOFF_MAX_SECONDS", 60.0)
+    monkeypatch.setattr(supervisor_mod, "log", MagicMock())
+    supervisor = _make_supervisor()
+
+    waits = await _run_loop(supervisor, [ConnectionError("down")] * 1100 + [None])
+
+    assert len(waits) == 1101
+    assert waits[1099] == 60.0
+    assert waits[-1] == 5.0
+
+
+@pytest.mark.asyncio
 async def test_reconcile_logs_one_traceback_per_state_change(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(supervisor_mod, "CONTROL_PLANE_POLL_INTERVAL_SECONDS", 5.0)
     supervisor = _make_supervisor()

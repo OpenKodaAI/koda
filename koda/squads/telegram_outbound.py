@@ -14,7 +14,7 @@ import html
 import itertools
 from typing import Any
 
-from telegram.error import BadRequest, NetworkError, RetryAfter
+from telegram.error import BadRequest, NetworkError, RetryAfter, TimedOut
 
 from koda.config import SQUAD_DEBOUNCE_MS
 from koda.logging_config import get_logger
@@ -125,13 +125,16 @@ def _combine_items(items: list[tuple[str | None, str, str | None, Any | None]], 
 
 
 async def _send_with_retry(bot: Any, kwargs: dict[str, Any]) -> Any:
-    """Send once more after a flood-wait or a transient network error; anything else raises."""
+    """Send once more after a flood-wait or a transient network error; anything else raises.
+
+    ``TimedOut`` is not retried: Telegram may already have delivered the message.
+    """
     try:
         return await bot.send_message(**kwargs)
     except RetryAfter as exc:
         delay = float(getattr(exc, "retry_after", 1.0) or 1.0)
         await asyncio.sleep(max(0.1, delay))
-    except BadRequest:
+    except (BadRequest, TimedOut):
         raise
     except NetworkError:
         await asyncio.sleep(_NETWORK_RETRY_DELAY_SECONDS)

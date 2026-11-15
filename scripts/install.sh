@@ -134,6 +134,10 @@ install_koda_cli() {
 }
 
 main() {
+  # Refuse an old Node.js before Docker is installed, so the host is left unchanged.
+  if command_exists node; then
+    require_supported_node
+  fi
   ensure_docker
   ensure_node_npm
   install_koda_cli

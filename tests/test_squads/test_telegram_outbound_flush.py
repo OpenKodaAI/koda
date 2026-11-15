@@ -6,7 +6,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from telegram.error import NetworkError
+from telegram.error import NetworkError, TimedOut
 
 from koda.squads import telegram_outbound as outbound
 
@@ -84,3 +84,17 @@ async def test_a_transient_error_is_retried_once() -> None:
     await _flush(bot, [("hello", None)])
 
     assert bot.send_message.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_a_timed_out_send_is_not_retried_but_is_logged(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Telegram may have delivered a timed-out message; a retry would post it twice."""
+    log = MagicMock()
+    monkeypatch.setattr(outbound, "log", log)
+    bot = MagicMock()
+    bot.send_message = AsyncMock(side_effect=[TimedOut(), None])
+
+    await _flush(bot, [("hello", None)])
+
+    bot.send_message.assert_awaited_once()
+    assert log.exception.call_args.args[0] == "squad_outbound_send_failed"

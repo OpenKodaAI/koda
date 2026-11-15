@@ -82,6 +82,15 @@ def test_node_20_or_later_is_accepted_as_is(tmp_path: Path, version: str) -> Non
     assert result.stdout.strip() == "ok"
 
 
+def test_an_old_node_aborts_before_docker_is_installed(tmp_path: Path) -> None:
+    snippet = "ensure_docker() { echo DOCKER_INSTALL_STARTED; }; main"
+    result = _run(tmp_path, snippet, path_prefix=_fake_node(tmp_path, "v18.19.1"))
+
+    assert result.returncode != 0
+    assert "Node.js 20 or later" in result.stderr
+    assert "DOCKER_INSTALL_STARTED" not in result.stdout
+
+
 @pytest.mark.parametrize(
     ("body", "expected"),
     [
