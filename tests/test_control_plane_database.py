@@ -1,5 +1,6 @@
 """Focused tests for control-plane database primary mode."""
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -84,12 +85,32 @@ def test_control_plane_execute_does_not_reinsert_when_returning_text_primary_key
     assert affected == 1
 
 
-def test_control_plane_with_connection_replays_operations_in_primary_mode():
+def test_control_plane_with_connection_replays_operations_in_one_transaction():
     import koda.control_plane.database as database
+
+    events: list[str] = []
+
+    @asynccontextmanager
+    async def _transaction():
+        events.append("begin")
+        yield
+        events.append("commit")
+
+    async def _execute(query: str, *params: object) -> str:
+        events.append(f"{query} {params}")
+        return "DELETE 1"
+
+    conn = SimpleNamespace(transaction=_transaction, execute=_execute)
+
+    @asynccontextmanager
+    async def _connection():
+        yield conn
+
+    backend = SimpleNamespace(_connection=_connection)
 
     with (
         patch("koda.control_plane.database.STATE_BACKEND", "postgres"),
-        patch("koda.control_plane.database.get_primary_state_backend", return_value=object()),
+        patch("koda.control_plane.database.get_primary_state_backend", return_value=backend),
         patch("koda.control_plane.database.primary_execute", new=AsyncMock(return_value=1)) as primary_execute,
     ):
 
@@ -102,4 +123,10 @@ def test_control_plane_with_connection_replays_operations_in_primary_mode():
         result = database.with_connection(_delete)
 
     assert result == "ok"
-    assert primary_execute.await_count == 2
+    primary_execute.assert_not_awaited()
+    assert events == [
+        "begin",
+        "DELETE FROM cp_workspace_squads WHERE workspace_id = $1 ('ws-1',)",
+        "DELETE FROM cp_workspaces WHERE id = $1 ('ws-1',)",
+        "commit",
+    ]

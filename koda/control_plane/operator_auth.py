@@ -24,7 +24,7 @@ from .bootstrap_file import (
     is_loopback_request,
     read_bootstrap_file,
 )
-from .database import execute, fetch_all, fetch_one, json_dump, json_load, now_iso
+from .database import execute, fetch_all, fetch_one, json_dump, json_load, now_iso, with_connection
 from .operator_profile_photos import (
     delete_operator_profile_photo,
     read_operator_profile_photo,
@@ -169,6 +169,11 @@ def _profile_photo_url(photo_hash: Any) -> str | None:
     if not normalized_hash:
         return None
     return f"/api/control-plane/auth/profile/photo?v={normalized_hash}"
+
+
+def _writer(conn: Any | None) -> Any:
+    """``conn.execute`` records the write into a ``with_connection`` transaction; without ``conn`` it runs at once."""
+    return conn.execute if conn is not None else execute
 
 
 def _optional_audit_user_id(value: Any) -> int | None:
@@ -355,7 +360,8 @@ class OperatorAuthService:
         # never matches, not even another empty one.
         return bool(file_code and typed) and compare_digest(file_code, typed)
 
-    def exchange_bootstrap_code(self, code: str) -> dict[str, Any]:
+    def _redeemable_bootstrap_code(self, code: str) -> Any:
+        """Return the unused, unexpired setup code row matching ``code``; nothing is consumed yet."""
         if self.has_owner():
             raise ValueError("Owner account already exists. Sign in instead.")
         if not str(code or "").strip():
@@ -367,6 +373,10 @@ class OperatorAuthService:
         if row is None or _is_expired(row.get("expires_at")) or row.get("consumed_at"):
             emit_security("security.operator_bootstrap_exchange_failed", reason="invalid_or_expired_code")
             raise ValueError("Setup code is invalid or expired.")
+        return row
+
+    def exchange_bootstrap_code(self, code: str) -> dict[str, Any]:
+        row = self._redeemable_bootstrap_code(code)
         registration_token = _random_secret("kodar")
         exchange_expires_at = (_utc_now() + timedelta(seconds=CONTROL_PLANE_REGISTRATION_TOKEN_TTL_SECONDS)).isoformat()
         execute(
@@ -404,14 +414,15 @@ class OperatorAuthService:
             email=email,
         )
 
-    def _issue_recovery_codes(self, *, user_id: str, generation: str) -> list[str]:
+    def _issue_recovery_codes(self, *, user_id: str, generation: str, conn: Any | None = None) -> list[str]:
         count = max(1, int(CONTROL_PLANE_RECOVERY_CODES_PER_USER or 10))
         issued_at = now_iso()
         codes: list[str] = []
+        write = _writer(conn)
         for _ in range(count):
             code = _random_code()
             codes.append(code)
-            execute(
+            write(
                 """
                 INSERT INTO cp_operator_recovery_codes (
                     id,
@@ -439,9 +450,16 @@ class OperatorAuthService:
             raise RuntimeError("Could not issue recovery codes.")
         return codes
 
-    def _revoke_sessions_for_user(self, user_id: str, *, except_session_id: str | None = None) -> None:
+    def _revoke_sessions_for_user(
+        self,
+        user_id: str,
+        *,
+        except_session_id: str | None = None,
+        conn: Any | None = None,
+    ) -> None:
+        write = _writer(conn)
         if except_session_id:
-            execute(
+            write(
                 """
                 UPDATE cp_operator_sessions
                 SET revoked_at = ?
@@ -450,7 +468,7 @@ class OperatorAuthService:
                 (now_iso(), user_id, except_session_id),
             )
             return
-        execute(
+        write(
             """
             UPDATE cp_operator_sessions
             SET revoked_at = ?
@@ -467,11 +485,33 @@ class OperatorAuthService:
         label: str,
         metadata: dict[str, Any] | None = None,
     ) -> tuple[str, OperatorAuthContext]:
+        session_token, session_id = self._insert_session(
+            user_id=user_id,
+            subject_type=subject_type,
+            label=label,
+            metadata=metadata,
+        )
+        return session_token, self._session_context(
+            user_id=user_id,
+            subject_type=subject_type,
+            session_id=session_id,
+        )
+
+    def _insert_session(
+        self,
+        *,
+        user_id: str | None,
+        subject_type: str,
+        label: str,
+        metadata: dict[str, Any] | None = None,
+        conn: Any | None = None,
+    ) -> tuple[str, str]:
+        """Write a new session row and return its token and id."""
         session_token = _random_secret("kodas")
         session_id = f"sess_{uuid4().hex}"
         now = _utc_now()
         expires_at = now + timedelta(seconds=CONTROL_PLANE_OPERATOR_SESSION_TTL_SECONDS)
-        execute(
+        _writer(conn)(
             """
             INSERT INTO cp_operator_sessions (
                 session_id,
@@ -499,8 +539,11 @@ class OperatorAuthService:
                 json_dump(metadata or {}),
             ),
         )
+        return session_token, session_id
+
+    def _session_context(self, *, user_id: str | None, subject_type: str, session_id: str) -> OperatorAuthContext:
         row = fetch_one("SELECT * FROM cp_operator_users WHERE id = ?", (user_id,)) if user_id else None
-        return session_token, OperatorAuthContext(
+        return OperatorAuthContext(
             auth_kind="session",
             subject_type=subject_type,
             user_id=str(row["id"]) if row else None,
@@ -536,6 +579,7 @@ class OperatorAuthService:
         self._validate_operator_password(password, username=normalized_username, email=normalized_email)
 
         row = None
+        redeem_setup_code = False
         trusted_loopback = (
             ALLOW_LOOPBACK_BOOTSTRAP
             and not str(registration_token or "").strip()
@@ -547,11 +591,10 @@ class OperatorAuthService:
             if row is None or row.get("exchange_consumed_at") or _is_expired(row.get("exchange_expires_at")):
                 raise ValueError("Registration token is invalid or expired.")
         elif str(bootstrap_code or "").strip():
-            exchange = self.exchange_bootstrap_code(bootstrap_code)
-            registration_token = str(exchange.get("registration_token") or "")
-            row = self._registration_row(registration_token)
-            if row is None or row.get("exchange_consumed_at") or _is_expired(row.get("exchange_expires_at")):
-                raise ValueError("Registration token is invalid or expired.")
+            # The setup code is consumed in the registration transaction below,
+            # so a failed registration leaves it usable.
+            row = self._redeemable_bootstrap_code(bootstrap_code)
+            redeem_setup_code = True
         elif not trusted_loopback:
             raise ValueError("Bootstrap code is invalid or expired.")
 
@@ -569,59 +612,72 @@ class OperatorAuthService:
         password_hash = _password_hasher().hash(password)
         user_id = f"usr_{uuid4().hex}"
         recovery_generation = uuid4().hex
-        execute(
-            """
-            INSERT INTO cp_operator_users (
-                id,
-                username,
-                email,
-                display_name,
-                password_hash,
-                role,
-                created_at,
-                updated_at,
-                last_login_at,
-                failed_login_attempts,
-                locked_until,
-                disabled,
-                totp_secret,
-                recovery_generation
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                user_id,
-                normalized_username,
-                normalized_email,
-                _safe_text(display_name or normalized_username),
-                password_hash,
-                "owner",
-                now_iso(),
-                now_iso(),
-                now_iso(),
-                0,
-                "",
-                0,
-                "",
-                recovery_generation,
-            ),
-        )
-        recovery_codes = self._issue_recovery_codes(user_id=user_id, generation=recovery_generation)
-        if row is not None:
-            execute(
-                "UPDATE cp_bootstrap_codes SET exchange_consumed_at = ? WHERE id = ?",
-                (now_iso(), str(row["id"])),
+        session_metadata = {"origin": "register_owner", "remote_ip": remote_ip, "forwarded_for": forwarded_for}
+
+        def _register(conn: Any) -> tuple[list[str], str, str]:
+            conn.execute(
+                """
+                INSERT INTO cp_operator_users (
+                    id,
+                    username,
+                    email,
+                    display_name,
+                    password_hash,
+                    role,
+                    created_at,
+                    updated_at,
+                    last_login_at,
+                    failed_login_attempts,
+                    locked_until,
+                    disabled,
+                    totp_secret,
+                    recovery_generation
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    normalized_username,
+                    normalized_email,
+                    _safe_text(display_name or normalized_username),
+                    password_hash,
+                    "owner",
+                    now_iso(),
+                    now_iso(),
+                    now_iso(),
+                    0,
+                    "",
+                    0,
+                    "",
+                    recovery_generation,
+                ),
             )
+            codes = self._issue_recovery_codes(user_id=user_id, generation=recovery_generation, conn=conn)
+            if row is not None and redeem_setup_code:
+                conn.execute(
+                    "UPDATE cp_bootstrap_codes SET consumed_at = ?, exchange_consumed_at = ? WHERE id = ?",
+                    (now_iso(), now_iso(), str(row["id"])),
+                )
+            elif row is not None:
+                conn.execute(
+                    "UPDATE cp_bootstrap_codes SET exchange_consumed_at = ? WHERE id = ?",
+                    (now_iso(), str(row["id"])),
+                )
+            token, session_id = self._insert_session(
+                user_id=user_id,
+                subject_type="operator",
+                label="web_owner_registration",
+                metadata=session_metadata,
+                conn=conn,
+            )
+            return codes, token, session_id
+
+        # Every write above commits together or not at all (D-056): a failure
+        # leaves no owner, no recovery codes, no session and an unused setup code.
+        recovery_codes, session_token, session_id = with_connection(_register)
+        if row is not None and redeem_setup_code:
+            emit_security("security.operator_bootstrap_exchanged", code_hint=str(row.get("code_hint") or ""))
         consume_bootstrap_file()
-        session_token, context = self._create_session(
-            user_id=user_id,
-            subject_type="operator",
-            label="web_owner_registration",
-            metadata={
-                "origin": "register_owner",
-                "remote_ip": remote_ip,
-                "forwarded_for": forwarded_for,
-            },
-        )
+        context = self._session_context(user_id=user_id, subject_type="operator", session_id=session_id)
         emit_security(
             "security.operator_owner_registered",
             user_id=_optional_audit_user_id(user_id),
@@ -679,27 +735,33 @@ class OperatorAuthService:
         )
 
         password_hash = _password_hasher().hash(new_password)
-        execute(
-            "UPDATE cp_operator_users SET password_hash = ?, updated_at = ? WHERE id = ?",
-            (password_hash, now_iso(), str(row["id"])),
-        )
-        execute(
-            """
-            UPDATE cp_operator_recovery_codes
-            SET consumed_at = ?, consumed_reason = ?
-            WHERE id = ?
-            """,
-            (now_iso(), "password_reset", str(code_row["id"])),
-        )
-        execute(
-            """
-            UPDATE cp_operator_recovery_codes
-            SET consumed_at = ?, consumed_reason = ?
-            WHERE user_id = ? AND consumed_at = '' AND generation = ?
-            """,
-            (now_iso(), "password_reset_invalidation", str(row["id"]), generation),
-        )
-        self._revoke_sessions_for_user(str(row["id"]))
+        user_id = str(row["id"])
+
+        def _reset(conn: Any) -> None:
+            conn.execute(
+                "UPDATE cp_operator_users SET password_hash = ?, updated_at = ? WHERE id = ?",
+                (password_hash, now_iso(), user_id),
+            )
+            conn.execute(
+                """
+                UPDATE cp_operator_recovery_codes
+                SET consumed_at = ?, consumed_reason = ?
+                WHERE id = ?
+                """,
+                (now_iso(), "password_reset", str(code_row["id"])),
+            )
+            conn.execute(
+                """
+                UPDATE cp_operator_recovery_codes
+                SET consumed_at = ?, consumed_reason = ?
+                WHERE user_id = ? AND consumed_at = '' AND generation = ?
+                """,
+                (now_iso(), "password_reset_invalidation", user_id, generation),
+            )
+            self._revoke_sessions_for_user(user_id, conn=conn)
+
+        # The new password, the spent codes and the revoked sessions commit together (D-056).
+        with_connection(_reset)
 
         emit_security(
             "security.operator_password_reset_recovery",

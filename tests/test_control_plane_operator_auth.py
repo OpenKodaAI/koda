@@ -25,6 +25,7 @@ from koda.control_plane import bootstrap_file as bootstrap_file_mod
 from koda.control_plane import database as control_plane_db
 from koda.control_plane import operator_auth as operator_auth_mod
 from koda.control_plane import operator_profile_photos
+from tests.postgres_fixtures import injected_fault
 
 STRONG_PASSWORD = "CorrectHorseBattery!9"
 ANOTHER_STRONG_PASSWORD = "R3volution@Nebula!42"
@@ -153,6 +154,34 @@ def test_owner_registration_with_bootstrap_file_code(operator_db: Path) -> None:
     assert len(stored) == 1
     assert stored[0]["code_hint"] == code[-4:]
     assert stored[0]["consumed_at"] and stored[0]["exchange_consumed_at"]
+
+
+@pytest.mark.postgres
+def test_owner_registration_fault_leaves_no_owner_without_recovery_codes(operator_db: Path) -> None:
+    """D-056: a write failing mid-registration rolls back every write, and the same setup code still works."""
+    service = operator_auth_mod.OperatorAuthService()
+    owner = {
+        "bootstrap_code": _bootstrap_file_code(service),
+        "email": "vps@example.com",
+        "password": STRONG_PASSWORD,
+        "remote_ip": "203.0.113.7",
+    }
+
+    with (
+        injected_fault("cp_operator_recovery_codes", "INSERT", rows_before=3),
+        pytest.raises(Exception, match="injected fault"),
+    ):
+        service.register_owner(**owner)
+
+    assert service.has_owner() is False
+    assert _count("cp_operator_users") == 0
+    assert _count("cp_operator_recovery_codes") == 0
+    assert _count("cp_operator_sessions") == 0
+    assert operator_db.exists(), "the bootstrap file is kept until registration commits"
+    payload = service.register_owner(**owner)
+    assert payload["operator"]["email"] == "vps@example.com"
+    assert _count("cp_operator_recovery_codes") == len(payload["recovery_codes"]) >= 10
+    assert not operator_db.exists()
 
 
 @pytest.mark.postgres
@@ -681,6 +710,30 @@ def test_password_reset_revokes_all_existing_sessions(operator_db: Path) -> None
         new_password=ANOTHER_STRONG_PASSWORD,
     )
     # All sessions revoked.
+    assert service.resolve_bearer_token(payload["session_token"]) is None
+
+
+@pytest.mark.postgres
+def test_password_reset_fault_changes_nothing(operator_db: Path) -> None:
+    """D-056: when revoking sessions fails, the password, the recovery codes and the sessions stay as they were."""
+    service = operator_auth_mod.OperatorAuthService()
+    payload = _create_owner(service)
+    reset = {
+        "identifier": "owner",
+        "recovery_code": payload["recovery_codes"][0],
+        "new_password": ANOTHER_STRONG_PASSWORD,
+    }
+
+    with injected_fault("cp_operator_sessions", "UPDATE"), pytest.raises(Exception, match="injected fault"):
+        service.reset_password_with_recovery_code(**reset)
+
+    unused = control_plane_db.fetch_one(
+        "SELECT COUNT(*) AS count FROM cp_operator_recovery_codes WHERE consumed_at = ''",
+    )
+    assert unused is not None and int(unused["count"]) == len(payload["recovery_codes"])
+    assert service.resolve_bearer_token(payload["session_token"]) is not None
+    assert service.login(identifier="owner", password=STRONG_PASSWORD)["operator"]["username"] == "owner"
+    assert service.reset_password_with_recovery_code(**reset) == {"ok": True}
     assert service.resolve_bearer_token(payload["session_token"]) is None
 
 

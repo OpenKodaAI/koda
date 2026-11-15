@@ -85,6 +85,11 @@ On successful registration the control plane:
 - opens a session
 - returns the plaintext codes **once only** in the HTTP response
 
+The user row, the recovery codes, the session and the consumption of the setup code are
+written in one database transaction. If any of these writes fails, none of them is kept:
+there is never an owner without recovery codes, and the same setup code can be used again.
+`bootstrap.txt` is deleted only after the transaction commits.
+
 The web UI shows the codes on the second setup screen, requires an acknowledgement checkbox
 ("I saved my codes"), and never retrieves them again.
 
@@ -340,6 +345,9 @@ their stronger password checks.
     `consumed_reason = "password_reset_invalidation"`
   - all sessions are revoked
   - the password hash is rotated
+
+  These writes are one database transaction: if any of them fails, the password, the
+  codes and the sessions all stay as they were, and the same code still works.
 - The owner must regenerate a fresh batch from `/settings/account` › Security (calling
   `POST /api/control-plane/auth/recovery-codes/regenerate`, which requires the current
   password).
