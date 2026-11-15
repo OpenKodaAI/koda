@@ -239,3 +239,37 @@ def test_upsert_refuses_unknown_network_mode(network_mode):
 @pytest.mark.parametrize("network_mode", ["none", "egress_allowlist", "any"])
 def test_upsert_accepts_known_network_modes(network_mode):
     validate_payload(_payload(isolation_constraints={"network_mode": network_mode}))
+
+
+# D-317: the control plane and the worker resolve a relative path differently
+
+
+@pytest.mark.parametrize("host", ["data", "./data", "../srv/data", "srv//data", "~nosuchuser-d317/data"])
+def test_upsert_refuses_relative_mount_hosts(host, koda_secret_paths):
+    with (
+        patch("koda.integrations.custom_mcp_registry.execute") as execute,
+        pytest.raises(ValidationError, match="absolute") as excinfo,
+    ):
+        upsert_custom_server(_mount_payload(host, read_only=True))
+    assert host in str(excinfo.value)
+    execute.assert_not_called()
+
+
+def test_upsert_accepts_a_home_relative_mount_host(koda_secret_paths, monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    validate_payload(_mount_payload("~/data", read_only=True))
+
+
+# D-318: a worker's per-agent state root is protected too
+
+
+@pytest.mark.parametrize("suffix", ["", "/control_plane"])
+def test_upsert_refuses_mounts_of_a_per_agent_state_root(suffix, koda_secret_paths, monkeypatch, tmp_path):
+    agent_state = tmp_path / "agent-a-state"
+    monkeypatch.setenv("AGENT_A_STATE_ROOT_DIR", str(agent_state))
+    with (
+        patch("koda.integrations.custom_mcp_registry.execute") as execute,
+        pytest.raises(ValidationError, match="mount"),
+    ):
+        upsert_custom_server(_mount_payload(f"{agent_state}{suffix}", read_only=True))
+    execute.assert_not_called()

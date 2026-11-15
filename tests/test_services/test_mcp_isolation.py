@@ -384,3 +384,74 @@ def test_constraints_from_dict_accepts_known_network_modes(network_mode):
 def test_constraints_from_dict_defaults_an_unset_network_mode():
     assert IsolationConstraints.from_dict({"cpu_quota": 1}).network_mode == "egress_allowlist"
     assert IsolationConstraints.from_dict({"network_mode": None}).network_mode == "egress_allowlist"
+
+
+# D-316: stored constraints saved before validation existed are refused at start
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("host", "reason"),
+    [
+        ("{state}", "sensitive host path"),  # the worker's own state root
+        ("{state}/control_plane", "sensitive host path"),
+        ("{agent_state}", "sensitive host path"),  # D-318: a per-agent override
+        ("relative/data", "absolute"),  # D-317
+        ("/etc", "sensitive host path"),
+    ],
+)
+async def test_bootstrap_refuses_a_stored_mount_the_save_check_would_refuse(host, reason, monkeypatch, tmp_path):
+    import koda.config as config
+    from koda.services import mcp_bootstrap
+    from koda.services.mcp_manager import McpServerManager
+
+    monkeypatch.delenv("KODA_MCP_ISOLATION", raising=False)
+    monkeypatch.setattr(config, "STATE_ROOT_DIR", tmp_path / "state")
+    monkeypatch.setenv("AGENT_1_STATE_ROOT_DIR", str(tmp_path / "agent-1-state"))
+    host = host.format(state=tmp_path / "state", agent_state=tmp_path / "agent-1-state")
+    _FakeStdioTransport.spawned = []
+    manager = McpServerManager()
+    manager._loops_started = True
+    control_plane = MagicMock()
+    catalog = {
+        "server_key": "legacy",
+        "transport_type": "stdio",
+        "command": ["mcp-legacy"],
+        "isolation_profile": "bwrap",
+        "isolation_constraints": {"mounts": [{"host": host, "container": "/data", "read_only": True}]},
+    }
+    with (
+        patch("koda.config.MCP_ENABLED", True),
+        patch("koda.services.mcp_isolation.shutil.which", side_effect=_which),
+        patch("koda.services.mcp_isolation.platform.system", return_value="Linux"),
+        patch("koda.services.mcp_manager.StdioTransport", _FakeStdioTransport),
+        patch("koda.services.mcp_manager.McpSession", return_value=_fake_session()),
+        patch("koda.services.mcp_manager.mcp_server_manager", manager),
+        patch.object(mcp_bootstrap, "_load_catalog_entry", return_value=catalog),
+        patch.object(
+            mcp_bootstrap,
+            "_load_agent_mcp_connections",
+            return_value=[{"server_key": "legacy", "enabled": True}],
+        ),
+        patch("koda.services.mcp_bridge.register_mcp_capabilities_for_agent", return_value={"tools": []}),
+        patch("koda.control_plane.manager.get_control_plane_manager", return_value=control_plane),
+        patch.object(mcp_bootstrap, "log") as bootstrap_log,
+    ):
+        summary = await mcp_bootstrap.bootstrap_mcp_for_agent("agent-1")
+
+    assert _FakeStdioTransport.spawned == []
+    assert manager.get_instance("legacy", "agent-1") is None
+    assert summary["started_servers"] == 0
+    [error] = summary["errors"]
+    assert error.startswith("legacy: refused to start")
+    assert reason in error
+    refusals = [call for call in bootstrap_log.warning.call_args_list if call.args[0] == "mcp_server_start_refused"]
+    assert len(refusals) == 1
+    assert refusals[0].kwargs["server_key"] == "legacy"
+    assert reason in refusals[0].kwargs["reason"]
+    control_plane._record_mcp_runtime_state.assert_called_once()
+    status = control_plane._record_mcp_runtime_state.call_args
+    assert status.args == ("agent-1", "legacy")
+    assert status.kwargs["success"] is False
+    assert status.kwargs["error"].startswith("refused to start")
+    assert reason in status.kwargs["error"]

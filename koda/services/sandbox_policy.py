@@ -525,12 +525,30 @@ def _is_forbidden_mount_path(normalized: str) -> bool:
 
 
 def _protected_mount_paths() -> tuple[str, ...]:
-    """Koda's state directory, its master keys and the Docker socket."""
+    """Koda's state directories, its master keys and the Docker socket."""
     from koda.config import STATE_ROOT_DIR
     from koda.control_plane.settings import CONTROL_PLANE_MASTER_KEY_FILE, CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE
 
-    koda_paths = (STATE_ROOT_DIR, CONTROL_PLANE_MASTER_KEY_FILE, CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE)
+    koda_paths = (
+        STATE_ROOT_DIR,
+        *_configured_state_roots(),
+        CONTROL_PLANE_MASTER_KEY_FILE,
+        CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE,
+    )
     return _with_resolved(tuple(_normalize_path(str(path)) for path in koda_paths) + _FORBIDDEN_MOUNT_EXACT)
+
+
+def _configured_state_roots() -> tuple[str, ...]:
+    """``STATE_ROOT_DIR`` and every per-agent ``{AGENT_ID}_STATE_ROOT_DIR`` in the environment.
+
+    In the control plane this names each worker's state root it can see; in a
+    worker ``koda.config.STATE_ROOT_DIR`` is already the worker's own.
+    """
+    return tuple(
+        value
+        for key, value in os.environ.items()
+        if (key == "STATE_ROOT_DIR" or key.endswith("_STATE_ROOT_DIR")) and value.strip()
+    )
 
 
 def _with_resolved(paths: tuple[str, ...]) -> tuple[str, ...]:
