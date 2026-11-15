@@ -469,7 +469,7 @@ def test_concurrent_resets_with_one_recovery_code_apply_one_password(
     winner = outcomes.index({"ok": True})
     fresh = operator_auth_mod.OperatorAuthService()
     assert fresh.login(identifier="owner", password=passwords[winner])["operator"]["username"] == "owner"
-    with pytest.raises(ValueError):
+    with pytest.raises(operator_auth_mod.AuthError):
         fresh.login(identifier="owner", password=passwords[1 - winner])
     reasons = [row["consumed_reason"] for row in control_plane_db.fetch_all("SELECT * FROM cp_operator_recovery_codes")]
     assert reasons.count("password_reset") == 1
