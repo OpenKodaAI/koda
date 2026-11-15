@@ -170,6 +170,13 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   share the network), the start logs `mcp_isolation_egress_allowlist_unenforced` and the
   server reports `egress: unrestricted` in its isolation status. (M1-E4-T6, D-028,
   D-133)
+- Channel gateway pairing: one message tries at most one code (the whole message, or
+  `/start CODE`), and a sender with 5 failed attempts in 15 minutes is locked out of
+  pairing for 15 minutes (`channel.pairing_locked`). The gateway keeps its state only in
+  Postgres; the `STATE_ROOT_DIR/channel_gateway` JSON file is no longer read or written.
+  Handling a message writes the sender's identity only when its status changes, so it no
+  longer overwrites an approval, block or revoke made from the dashboard at the same
+  time. (M1-E5-T3, D-182)
 
 
 ### Added

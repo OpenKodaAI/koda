@@ -7,6 +7,7 @@ import pytest
 import koda.auth as auth_module
 from koda.auth import auth_check, is_admin, reject_unauthorized
 from koda.channels import gateway
+from scripts.channel_gateway_smoke import InMemoryChannelGatewayBackend
 
 
 @pytest.fixture(autouse=True)
@@ -14,8 +15,8 @@ def _allowed_user_ids(monkeypatch, tmp_path) -> None:
     auth_module.ALLOWED_USER_IDS = {111}
     auth_module.ADMIN_USER_IDS = {111}
     auth_module.AGENT_ID = "AUTH"
-    monkeypatch.setattr(gateway, "STATE_ROOT_DIR", tmp_path)
-    monkeypatch.setattr(gateway, "_primary_backend", lambda _agent_id: None)
+    backend = InMemoryChannelGatewayBackend()
+    monkeypatch.setattr(gateway, "_primary_backend", lambda _agent_id: backend)
     monkeypatch.setattr(gateway, "_emit_observability", lambda *_args, **_kwargs: None)
 
 

@@ -22,10 +22,15 @@ It does not mean "allow everyone".
 1. Open the agent's Telegram channel card in the dashboard.
 2. Confirm the bot token is connected.
 3. Click **Pairing code** in the channel gateway panel.
-4. Send that code to the bot from the desired Telegram account or chat.
+4. Send that code to the bot from the desired Telegram account or chat, as the
+   whole message or as `/start CODE`.
 5. Send the real task again after the bot confirms pairing.
 
 The code message is never enqueued as a task. It only approves the identity.
+A code expires after 15 minutes and works once. A sender gets 5 failed pairing
+attempts per 15 minutes; the fifth locks it out of pairing for 15 minutes and
+it is told to wait. Approve the sender from the unknown queue if it cannot
+wait.
 
 ## Review Unknown Senders
 
@@ -51,6 +56,7 @@ routing. Revoked identities deny before enqueue and override legacy
 | `channel.identity_unknown` | Sender was not approved and is queued. | Approve, block, or create a pairing code. |
 | `channel.pairing_required` | Channel is connected but has no approved sender. | Pair or approve a sender. |
 | `channel.policy_denied` | Sender is blocked or revoked. | Keep blocked or explicitly approve again. |
+| `channel.pairing_locked` | Sender made too many failed pairing attempts. | Wait 15 minutes, or approve the sender from the unknown queue. |
 | `channel.relay_failed` | Gateway could not deliver a channel reply. | Inspect channel token, Telegram API status, and runtime logs. |
 
 ## Validation
@@ -94,8 +100,8 @@ must pass locally.
   identity or legacy `ALLOWED_USER_IDS` values.
 - If an approved sender is still denied, verify the Telegram `channel_id` and
   `user_id`; group chat identity is different from a direct chat.
-- If the dashboard cannot load gateway state, inspect Postgres and fallback
-  file permissions under `STATE_ROOT_DIR/channel_gateway`.
+- If the dashboard cannot load gateway state, inspect Postgres: the gateway
+  keeps its state only there.
 - If pairing succeeds but the user sees no task, ask them to send the actual
   task again. Pairing text is intentionally discarded.
 

@@ -8,6 +8,7 @@ from koda.channels import gateway
 from koda.channels.base import ChannelAdapter
 from koda.channels.manager import ChannelManager, detect_configured_channels
 from koda.channels.types import ChannelIdentity, IncomingMessage
+from scripts.channel_gateway_smoke import InMemoryChannelGatewayBackend
 
 
 class MockAdapter(ChannelAdapter):
@@ -85,8 +86,8 @@ def _incoming(channel_type: str, text: str = "hello") -> IncomingMessage:
 
 
 def _isolate_gateway(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(gateway, "STATE_ROOT_DIR", tmp_path)
-    monkeypatch.setattr(gateway, "_primary_backend", lambda _agent_id: None)
+    backend = InMemoryChannelGatewayBackend()
+    monkeypatch.setattr(gateway, "_primary_backend", lambda _agent_id: backend)
     monkeypatch.setattr(gateway, "_emit_observability", lambda *_args, **_kwargs: None)
 
 
