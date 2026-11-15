@@ -17,7 +17,9 @@ Pinned guarantees:
     this process, is never recovered or dispatched a second time.
   * Each agent's process materializes, claims and dispatches only its own
     agent's jobs, through its own bot and under its own policy, so a job's
-    policy snapshot never flips between agents.
+    policy snapshot never flips between agents. Lease recovery is scoped the
+    same way: only the owning agent's process, which knows whether the dispatch
+    still runs, recovers its runs.
   * ``POST /api/runtime/schedules`` queues a validation run for the new job
     instead of attempting an activation that the scheduler always rejects, and
     the queued validation activates the job when it passes (or leaves it
@@ -492,6 +494,61 @@ async def test_each_agent_materializes_and_dispatches_only_its_own_jobs_under_it
     assert _events(job_b, "job.policy_snapshot_refreshed") == []
     assert _reminders_sent(application_b) == ["⏰ Reminder: Drink water"]
     assert _reminders_sent(application_a) == ["⏰ Reminder: Stretch break"]
+
+
+@contextlib.contextmanager
+def _another_process() -> Iterator[None]:
+    """Run a dispatch cycle as a separate process: its own dispatcher id and no in-flight runs."""
+    from koda.services import scheduled_job_dispatcher
+
+    with (
+        patch.object(scheduled_job_dispatcher, "_dispatcher_id", "other-host:4242:feedbeef"),
+        patch.object(scheduled_job_dispatcher, "_inflight_run_ids", {}),
+        patch.object(scheduled_job_dispatcher, "_inflight_dispatch_tasks", set()),
+    ):
+        yield
+
+
+async def test_another_agents_process_never_recovers_a_run_this_agent_still_dispatches(scheduler_db: str) -> None:
+    from koda.services import scheduled_job_dispatcher, scheduled_jobs
+
+    application_a, application_b = _fake_application(), _fake_application()
+    send_started = asyncio.Event()
+    release_send = asyncio.Event()
+
+    async def _slow_send(**_kwargs: Any) -> None:
+        send_started.set()
+        await release_send.wait()
+
+    with _as_agent("AGENT_A", _POLICY_A):
+        job_id = await _active_reminder_job(application_a)
+        application_a.bot.send_message = AsyncMock(side_effect=_slow_send)
+        due_at = scheduled_jobs._utcnow() - timedelta(seconds=5)
+        scheduled_jobs._touch_job(job_id, next_run_at=scheduled_jobs._iso(due_at))
+        assert (await scheduled_jobs.run_dispatch_cycle(application_a))["claimed"] == 1
+        await asyncio.wait_for(send_started.wait(), timeout=10)
+    [run] = _runs(job_id, scheduled_jobs.RUN_TRIGGER_NORMAL)
+
+    # Agent A's send outlives a short lease while agent B's process cycles: agent B cannot see
+    # that agent A still dispatches the run, so it must leave the run alone.
+    _expire_lease(int(run["id"]))
+    with _as_agent("AGENT_B", _POLICY_B), _another_process():
+        cycle = await scheduled_jobs.run_dispatch_cycle(application_b)
+
+    assert cycle["claimed"] == 0
+    [live_run] = _runs(job_id, scheduled_jobs.RUN_TRIGGER_NORMAL)
+    assert live_run["status"] == scheduled_jobs.RUN_STATUS_RUNNING
+    assert live_run["lease_recovery_count"] == 0
+    assert _events(job_id, "run.lease_recovered") == []
+
+    with _as_agent("AGENT_A", _POLICY_A):
+        release_send.set()
+        await asyncio.gather(*list(scheduled_job_dispatcher._inflight_dispatch_tasks))
+    [finished_run] = _runs(job_id, scheduled_jobs.RUN_TRIGGER_NORMAL)
+    assert finished_run["status"] == scheduled_jobs.RUN_STATUS_SUCCEEDED, finished_run.get("error_message")
+    assert finished_run["lease_recovery_count"] == 0
+    assert _reminders_sent(application_a) == ["⏰ Reminder: Stretch break"]
+    application_b.bot.send_message.assert_not_called()
 
 
 class _AllowRuntimeAccess:

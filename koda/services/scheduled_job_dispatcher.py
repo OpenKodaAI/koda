@@ -398,14 +398,19 @@ def wake_dispatcher() -> None:
 def recover_expired_leases() -> int:
     jobs = _jobs()
     now = jobs._utcnow()
+    # Only this agent's runs: whether a run's dispatch still runs is known only inside the owning
+    # agent's process, so another agent's process must never recover (and re-run) it.
     rows = _store().fetch_all(
         """
-        SELECT id, scheduled_job_id, task_id, max_attempts, lease_recovery_count, trace_id, trigger_reason
-        FROM scheduled_job_runs
-        WHERE status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
-        ORDER BY id ASC
+        SELECT r.id, r.scheduled_job_id, r.task_id, r.max_attempts, r.lease_recovery_count, r.trace_id,
+               r.trigger_reason
+        FROM scheduled_job_runs r
+        JOIN scheduled_jobs j ON j.id = r.scheduled_job_id
+        WHERE r.status = ? AND r.lease_expires_at IS NOT NULL AND r.lease_expires_at < ?
+          AND j.agent_id IS NOT DISTINCT FROM ?
+        ORDER BY r.id ASC
         """,
-        (jobs.RUN_STATUS_RUNNING, jobs._iso(now)),
+        (jobs.RUN_STATUS_RUNNING, jobs._iso(now), jobs.AGENT_ID),
     )
     recovered = 0
     refreshed = 0
