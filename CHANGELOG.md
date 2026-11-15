@@ -171,6 +171,29 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   no parent package. (D-270)
 - Skill package code always runs from its verified `.py` sources, also for modules it loads
   at tool-call time; a bytecode cache planted after approval never runs. (D-273)
+- A failed MCP OAuth callback redirects only to the origin of
+  `MCP_OAUTH_CALLBACK_BASE_URL`, at `/oauth/callback` with the error code, and answers
+  JSON when that setting is empty. It no longer redirects to a `frontend_callback_uri`
+  taken from the query string or the session. (M1-E3-T6, D-030)
+- Stdio MCP servers start with the isolation profile and constraints stored in their
+  catalog entry instead of the defaults. Docker isolation passes the server environment
+  by name (`-e NAME`) instead of writing it to a temp file that was never deleted, and
+  refuses to start a server whose env sets `DOCKER_*`, `HOME` or `PATH`, which the
+  docker CLI would read for itself. When
+  the sandbox cannot enforce `egress_allowlist` (bubblewrap, sandbox-exec and Docker all
+  share the network), the start logs `mcp_isolation_egress_allowlist_unenforced` and the
+  server reports `egress: unrestricted` in its isolation status. (M1-E4-T6, D-028,
+  D-133)
+- Channel gateway pairing: codes are 8 letters and digits, one message tries at most
+  one code (the whole message, or `/start CODE`) and other messages are not attempts,
+  and a sender (one user across all its chats) with 5 failed attempts in 15 minutes is
+  locked out of pairing for 15 minutes (`channel.pairing_locked`). The gateway keeps its
+  state only in Postgres; the `STATE_ROOT_DIR/channel_gateway` JSON file is no longer
+  read or written. Handling a message writes the sender's identity only when its status
+  changes and does not put a queue item the dashboard resolved back as pending, so it no
+  longer overwrites an approval, block or revoke made from the dashboard at the same
+  time. A failed identity read denies the message (`channel.gateway_unavailable`)
+  without writing anything. (M1-E5-T3, D-182)
 
 
 ### Added

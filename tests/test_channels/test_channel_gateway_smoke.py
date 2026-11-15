@@ -34,8 +34,8 @@ def _message(text: str = "hello", *, user_id: str = "42", is_group: bool = False
 
 
 def _isolate_gateway(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(gateway, "STATE_ROOT_DIR", tmp_path)
-    monkeypatch.setattr(gateway, "_primary_backend", lambda _agent_id: None)
+    backend = channel_gateway_smoke.InMemoryChannelGatewayBackend()
+    monkeypatch.setattr(gateway, "_primary_backend", lambda _agent_id: backend)
     monkeypatch.setattr(gateway, "_emit_observability", lambda *_args, **_kwargs: None)
 
 

@@ -27,7 +27,6 @@ import os
 import platform
 import shutil
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -202,8 +201,8 @@ class BwrapIsolation:
 
         if constraints.network_mode == "none":
             argv.append("--unshare-net")
-        # else: bwrap shares net by default; fine-grained egress filtering
-        # would need an out-of-band egress proxy and is out of scope here.
+        # else: bwrap shares the host network; it cannot enforce an egress
+        # allowlist, so ``effective_egress`` reports such a server as unrestricted.
 
         for mount in constraints.mounts:
             host_path = str(Path(mount.host).expanduser())
@@ -325,12 +324,22 @@ class DockerIsolation:
             if mount.read_only:
                 mount_spec = f"{mount_spec},readonly"
             argv.extend(["--mount", mount_spec])
-        # Pass env via a temp file (ephemeral; closed when the process exits).
-        env_file = _write_env_file(_scrub_env(env))
-        argv.extend(["--env-file", env_file])
+        # Pass env by name only: ``-e NAME`` makes the docker CLI copy the value
+        # from its own environment, so secrets stay out of argv and off disk.
+        server_env = _scrub_env(env)
+        # Names the docker CLI reads itself would reconfigure the CLI (daemon,
+        # context, config, credential helpers) instead of reaching only the
+        # container, so they are refused.
+        cli_names = sorted(name for name in server_env if _read_by_docker_cli(name))
+        if cli_names:
+            raise RuntimeError(
+                "docker isolation cannot pass env names the docker CLI reads itself: " + ", ".join(cli_names)
+            )
+        for name in server_env:
+            argv.extend(["-e", name])
         argv.append(constraints.docker_image)
         argv.extend(command)
-        return argv, {}
+        return argv, {**os.environ, **server_env}
 
 
 # Factory
@@ -384,29 +393,23 @@ _BLOCKED_ENV_NAMES: frozenset[str] = frozenset(
 )
 
 
+def _read_by_docker_cli(name: str) -> bool:
+    upper = name.upper()
+    return upper.startswith("DOCKER_") or upper in {"HOME", "PATH"}
+
+
 def _scrub_env(env: dict[str, str]) -> dict[str, str]:
     """Drop blocked env vars before passing to the sandboxed process."""
     return {k: v for k, v in env.items() if k not in _BLOCKED_ENV_NAMES}
 
 
-def _write_env_file(env: dict[str, str]) -> str:
-    """Persist env to a temp file readable only by the current user. Caller is
-    responsible for cleanup; the file is auto-removed by the OS at process
-    exit because we set the temp dir.
+def effective_egress(kind: IsolationKind, constraints: IsolationConstraints) -> Literal["none", "unrestricted"]:
+    """Egress the strategy actually enforces. No strategy enforces an allowlist:
+    ``egress_allowlist`` shares the host network, so it reports ``unrestricted``.
     """
-    fd, path = tempfile.mkstemp(prefix="koda-mcp-env-", suffix=".env")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            for k, v in env.items():
-                # ``--env-file`` accepts KEY=VALUE per line. Strip newlines from
-                # values to avoid breaking the format.
-                cleaned = v.replace("\n", " ").replace("\r", " ")
-                fh.write(f"{k}={cleaned}\n")
-        os.chmod(path, 0o600)
-    except OSError:
-        os.close(fd)
-        raise
-    return path
+    if constraints.network_mode == "none" and kind != "native":
+        return "none"
+    return "unrestricted"
 
 
 def isolation_runtime_summary() -> dict[str, Any]:

@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import platform
-from unittest.mock import patch
+import tempfile
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from koda.services.mcp_client import McpToolDefinition
 from koda.services.mcp_isolation import (
     BwrapIsolation,
     DockerIsolation,
@@ -95,17 +100,43 @@ def test_sandbox_exec_profile_includes_mounts_and_network_toggle():
         assert argv[-1] == "bin"
 
 
-def test_docker_wrap_uses_env_file_and_cap_drops():
+def test_docker_wrap_passes_env_by_name_and_cap_drops(monkeypatch, tmp_path):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setenv("DOCKER_CONFIG", "/srv/docker-config")
     with patch("koda.services.mcp_isolation.shutil.which", return_value="/usr/bin/docker"):
         strategy = DockerIsolation()
-        argv, env = strategy.wrap(["npx", "pkg"], {"TOKEN": "abc"}, IsolationConstraints())
+        argv, env = strategy.wrap(["npx", "pkg"], {"TOKEN": "abc", "LD_PRELOAD": "/tmp/x.so"}, IsolationConstraints())
         joined = " ".join(argv)
         assert "--cap-drop=ALL" in joined
         assert "--read-only" in joined
         assert "--network bridge" in joined
-        # Env is NOT passed via argv; it goes through --env-file.
-        assert env == {}
-        assert "--env-file" in argv
+        # Env goes by name only: the value stays out of argv and no env file is written.
+        assert "-e TOKEN" in joined
+        assert "abc" not in joined
+        assert "--env-file" not in argv
+        assert "LD_PRELOAD" not in joined
+        assert list(tmp_path.iterdir()) == []
+        # The docker CLI reads each named value from its own environment, which keeps the inherited one.
+        assert env["TOKEN"] == "abc"
+        assert env["DOCKER_CONFIG"] == "/srv/docker-config"
+        assert "LD_PRELOAD" not in env
+
+
+@pytest.mark.parametrize("name", ["DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "DOCKER_CERT_PATH", "HOME", "PATH"])
+def test_docker_wrap_refuses_env_names_the_docker_cli_reads(name):
+    # ``-e NAME`` reads the value from the docker CLI's own environment, so these
+    # names would reconfigure the CLI (daemon, context, config, credential helpers)
+    # instead of reaching only the container.
+    with patch("koda.services.mcp_isolation.shutil.which", return_value="/usr/bin/docker"):
+        strategy = DockerIsolation()
+        with pytest.raises(RuntimeError, match=name) as excinfo:
+            strategy.wrap(
+                ["mcp-docker"],
+                {name: "tcp://remote:2375", "TOKEN": "abc"},
+                IsolationConstraints(network_mode="none"),
+            )
+    assert "tcp://remote:2375" not in str(excinfo.value)
+    assert "abc" not in str(excinfo.value)
 
 
 def test_blocked_env_is_scrubbed_in_isolated_strategies():
@@ -122,3 +153,130 @@ def test_isolation_runtime_summary_returns_strategies():
     assert "active_default" in summary
     kinds = {entry["kind"] for entry in summary["strategies"]}
     assert {"bwrap", "sandbox-exec", "docker", "native"} <= kinds
+
+
+# Stored isolation settings reach the spawned command (fake process runner)
+
+
+class _FakeStdioTransport:
+    """Records the argv and env the stdio transport would exec."""
+
+    spawned: list[dict[str, Any]] = []
+
+    def __init__(self, command: str, args: list[str] | None = None, env: dict[str, str] | None = None) -> None:
+        _FakeStdioTransport.spawned.append({"argv": [command, *(args or [])], "env": env})
+
+    async def start(self) -> None:
+        return None
+
+    async def close(self) -> None:
+        return None
+
+
+def _fake_session() -> MagicMock:
+    session = MagicMock()
+    session.initialize = AsyncMock(return_value={})
+    session.list_tools = AsyncMock(return_value=[McpToolDefinition(name="read", description="Read")])
+    session.list_resources = AsyncMock(return_value=[])
+    session.list_prompts = AsyncMock(return_value=[])
+    return session
+
+
+def _which(name: str) -> str:
+    return f"/usr/bin/{name}"
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_spawns_the_stored_isolation_profile_and_constraints(monkeypatch, tmp_path):
+    from koda.services import mcp_bootstrap
+    from koda.services.mcp_manager import McpServerManager
+
+    monkeypatch.delenv("KODA_MCP_ISOLATION", raising=False)
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    _FakeStdioTransport.spawned = []
+    manager = McpServerManager()
+    manager._loops_started = True
+    catalog = {
+        "server_key": "github",
+        "transport_type": "stdio",
+        "command": ["mcp-github"],
+        "isolation_profile": "docker",
+        "isolation_constraints": {
+            "network_mode": "none",
+            "cpu_quota": 1.5,
+            "memory_limit_bytes": 512 * 1024 * 1024,
+            "docker_image": "example/mcp:1",
+            "mounts": [{"host": "/srv/data", "container": "/data"}],
+        },
+    }
+    with (
+        patch("koda.config.MCP_ENABLED", True),
+        patch("koda.services.mcp_isolation.shutil.which", side_effect=_which),
+        patch("koda.services.mcp_isolation.platform.system", return_value="Linux"),
+        patch("koda.services.mcp_manager.StdioTransport", _FakeStdioTransport),
+        patch("koda.services.mcp_manager.McpSession", return_value=_fake_session()),
+        patch("koda.services.mcp_manager.mcp_server_manager", manager),
+        patch.object(mcp_bootstrap, "_load_catalog_entry", return_value=catalog),
+        patch.object(
+            mcp_bootstrap,
+            "_load_agent_mcp_connections",
+            return_value=[{"server_key": "github", "enabled": True, "env_values": {"API_TOKEN": "secret"}}],
+        ),
+        patch("koda.services.mcp_bridge.register_mcp_capabilities_for_agent", return_value={"tools": []}),
+        patch("koda.control_plane.manager.get_control_plane_manager", return_value=MagicMock()),
+    ):
+        summary = await mcp_bootstrap.bootstrap_mcp_for_agent("agent-1")
+
+    assert summary["errors"] == []
+    assert len(_FakeStdioTransport.spawned) == 1
+    argv = _FakeStdioTransport.spawned[0]["argv"]
+    joined = " ".join(argv)
+    assert argv[:2] == ["/usr/bin/docker", "run"]
+    assert "--memory 512m" in joined
+    assert "--cpus 1.5" in joined
+    assert "--network none" in joined
+    assert "--mount type=bind,source=/srv/data,target=/data,readonly" in joined
+    assert argv[-2:] == ["example/mcp:1", "mcp-github"]
+    assert "-e API_TOKEN" in joined
+    assert "secret" not in joined
+    assert "--env-file" not in argv
+    assert _FakeStdioTransport.spawned[0]["env"]["API_TOKEN"] == "secret"
+    assert list(tmp_path.iterdir()) == []
+    instance = manager.get_instance("github", "agent-1")
+    assert instance is not None
+    assert instance.isolation_status == {"isolation": "docker", "egress": "none"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("network_mode", "expected_egress", "warned"),
+    [("egress_allowlist", "unrestricted", True), ("none", "none", False)],
+)
+async def test_bwrap_status_reports_the_egress_it_can_enforce(network_mode, expected_egress, warned, monkeypatch):
+    from koda.services.mcp_manager import McpServerInstance
+
+    monkeypatch.delenv("KODA_MCP_ISOLATION", raising=False)
+    _FakeStdioTransport.spawned = []
+    with (
+        patch("koda.services.mcp_isolation.shutil.which", side_effect=_which),
+        patch("koda.services.mcp_isolation.platform.system", return_value="Linux"),
+        patch("koda.services.mcp_manager.StdioTransport", _FakeStdioTransport),
+        patch("koda.services.mcp_manager.McpSession", return_value=_fake_session()),
+        patch("koda.services.mcp_manager.logger") as manager_logger,
+    ):
+        instance = McpServerInstance(
+            "github",
+            "agent-1",
+            "stdio",
+            command=["mcp-github"],
+            isolation_profile="bwrap",
+            isolation_constraints=IsolationConstraints(network_mode=network_mode),
+        )
+        await instance.start()
+
+    argv = _FakeStdioTransport.spawned[0]["argv"]
+    assert argv[0] == "/usr/bin/bwrap"
+    assert ("--unshare-net" in argv) is (network_mode == "none")
+    assert instance.isolation_status == {"isolation": "bwrap", "egress": expected_egress}
+    warnings = [call.args[0] for call in manager_logger.warning.call_args_list]
+    assert ("mcp_isolation_egress_allowlist_unenforced" in warnings) is warned
