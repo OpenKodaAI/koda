@@ -3998,7 +3998,8 @@ def _requires_kernel_terminal(runtime_env_id: int | None, run_result: RunResult)
     Only a task with a runtime environment runs its provider on a kernel terminal: a light task
     gets no environment, and a cache hit runs no provider. An error result without a terminal ran
     no provider either (no eligible or available provider), so its error reaches the user (D-297);
-    a provider run in an environment registers its terminal before it starts.
+    a provider run in an environment registers its terminal before it starts. The caller checks
+    after the completed-output recovery step, so a result delivered as a success always needs one.
     """
     if run_result.error and not run_result.runtime_terminal_path:
         return False
@@ -7949,6 +7950,16 @@ async def _execute_single_task(
                     if RUNTIME_ENVIRONMENTS_ENABLED:
                         task_root = Path(runtime.runtime_root) / "tasks" / str(task_id)
                         task_root.mkdir(parents=True, exist_ok=True)
+
+                    if _recover_provider_error_with_completed_output(run_result):
+                        log.warning(
+                            "provider_error_recovered_with_completed_output",
+                            task_id=task_id,
+                            provider=run_result.provider,
+                            model=run_result.model,
+                            stop_reason=run_result.stop_reason,
+                        )
+                    # After the recovery step, which can turn an error into a success (D-297).
                     if _requires_kernel_terminal(task_info.runtime_env_id, run_result):
                         runtime_terminal_path = str(run_result.runtime_terminal_path or "")
                         if not runtime_terminal_path.startswith(("kernel://", "kernel-stream://")):
@@ -7960,15 +7971,6 @@ async def _execute_single_task(
                                 label=f"{run_result.provider} attempt {attempt}",
                                 path=runtime_terminal_path,
                             )
-
-                    if _recover_provider_error_with_completed_output(run_result):
-                        log.warning(
-                            "provider_error_recovered_with_completed_output",
-                            task_id=task_id,
-                            provider=run_result.provider,
-                            model=run_result.model,
-                            stop_reason=run_result.stop_reason,
-                        )
 
                     # Check if the result itself indicates a retryable error
                     if run_result.error and (

@@ -264,6 +264,33 @@ def _apply_feature_model_change(text: str, user_data: dict[str, Any], settings: 
     )
 
 
+def _feature_only_provider_reply(text: str, settings: dict[str, Any]) -> str | None:
+    """Answer a feature-only provider named without its feature (D-296): it never becomes the general provider."""
+    if _find_feature_from_text(text):
+        return None
+    general_provider_ids = set(_general_provider_ids(settings))
+    features_by_provider: dict[str, list[str]] = {}
+    for function_id, options in _feature_option_map(settings).items():
+        if function_id == "general":
+            continue
+        for item in options:
+            provider_id = normalize_feature_provider(str(item.get("provider_id") or ""))
+            if not provider_id or provider_id in general_provider_ids:
+                continue
+            features = features_by_provider.setdefault(provider_id, [])
+            if function_id not in features:
+                features.append(function_id)
+    named_provider = _find_provider_in_text(text, list(features_by_provider), feature=True)
+    if not named_provider:
+        return None
+    features = features_by_provider[named_provider]
+    feature_list = ", ".join(f"<code>{function_id}</code>" for function_id in features)
+    return (
+        f"Nothing changed: <code>{named_provider}</code> is a provider for {feature_list}, not the general provider. "
+        f"Name the feature, for example: <code>switch {features[0]} to {named_provider}</code>."
+    )
+
+
 def _apply_voice_change(text: str, user_data: dict[str, Any]) -> str | None:
     if "voz" not in text and "voice" not in text:
         return None
@@ -314,6 +341,10 @@ def maybe_apply_agent_local_settings_from_chat(query_text: str, user_data: dict[
         model_message = _apply_general_model_change(normalized_text, user_data, settings)
         if model_message:
             return model_message
+
+        feature_only_reply = _feature_only_provider_reply(normalized_text, settings)
+        if feature_only_reply:
+            return feature_only_reply
     except ValueError as exc:
         # A setter raises ValueError for a change it could not apply, such as a failed publish.
         return html.escape(str(exc), quote=False)

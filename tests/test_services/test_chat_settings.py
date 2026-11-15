@@ -181,6 +181,7 @@ def test_failed_publish_is_reported_instead_of_a_model_change() -> None:
 
 def test_feature_only_provider_without_a_feature_is_not_a_general_provider_change() -> None:
     # D-296: "switch to kokoro" named no feature, and kokoro resolved to the default general provider.
+    # Nothing changes, and the reply asks for the feature instead of leaving the answer to the agent.
     user_data: dict[str, object] = {}
     with (
         patch("koda.utils.command_helpers.DEFAULT_PROVIDER", "claude"),
@@ -191,7 +192,11 @@ def test_feature_only_provider_without_a_feature_is_not_a_general_provider_chang
     ):
         message = maybe_apply_agent_local_settings_from_chat("switch to kokoro", user_data)
 
-    assert message is None
+    assert message == (
+        "Nothing changed: <code>kokoro</code> is a provider for <code>audio</code>, not the general provider. "
+        "Name the feature, for example: <code>switch audio to kokoro</code>."
+    )
+    assert user_data == {}
     mock_provider.assert_not_called()
     mock_model.assert_not_called()
     mock_feature.assert_not_called()

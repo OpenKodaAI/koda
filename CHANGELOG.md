@@ -359,6 +359,15 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   agent's knowledge corpus is empty, the answer is still evaluated (action plan, metrics,
   warnings) but the grounding gate does not retain it, and the runtime logs
   `grounding_gate_skipped` instead. (M6-E1-T5, F-MEM-28)
+- With `RUNTIME_ENVIRONMENTS_ENABLED=true`, a task whose provider never ran (no eligible
+  provider, or the provider is unavailable) now fails with the provider error, such as "No
+  verified providers are eligible for runtime fallback.", instead of "runtime terminal
+  output requires a kernel-backed terminal path". A provider error that is delivered as a
+  completed answer still needs the kernel terminal. (D-297)
+- A chat message that names a provider used only by one feature (`elevenlabs`, `kokoro`
+  or `whispercpp`) without the feature, such as "switch to kokoro", no longer changes the
+  agent's general provider to the default one. Nothing changes, and the reply names the
+  feature to use, for example "switch audio to kokoro". (D-296)
 
 
 ## [1.0.18] - 2026-05-20
