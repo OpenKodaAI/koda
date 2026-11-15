@@ -11,9 +11,11 @@ import os
 import re
 import threading
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -170,6 +172,7 @@ from .agent_spec import (
     resolve_scope_documents,
     validate_agent_spec,
 )
+from .agent_tables import AGENT_DELETE_TABLES, PER_AGENT_TABLES
 from .crypto import decrypt_secret, encrypt_secret, mask_secret
 from .dashboard_memory import (
     apply_memory_curation_action as dashboard_apply_memory_curation_action,
@@ -301,6 +304,14 @@ _PROVIDER_DOWNLOAD_PROVIDER_IDS: frozenset[str] = frozenset({"kokoro", "superton
 
 class _ProviderDownloadCancelled(RuntimeError):
     """Internal signal used to stop provider downloads cooperatively."""
+
+
+class AgentIdConflictError(Exception):
+    """An agent with this id, after normalisation, already exists. The API answers 409."""
+
+    def __init__(self, agent_id: str) -> None:
+        self.agent_id = agent_id
+        super().__init__(f"agent id {agent_id} already exists")
 
 
 class GeneralPayloadValidationError(ValueError):
@@ -1078,6 +1089,21 @@ def _normalize_agent_id(agent_id: str) -> str:
     return normalized
 
 
+def _generated_agent_id_candidates(display_name: str) -> Iterator[str]:
+    """Yield ids for an agent created without one: the display name, then ``_2``, ``_3``..."""
+    ascii_name = unicodedata.normalize("NFKD", display_name).encode("ascii", "ignore").decode("ascii")
+    try:
+        base = _normalize_agent_id(ascii_name)[:48].strip("_")
+    except ValueError:
+        base = ""
+    base = base or "AGENT"
+    yield base
+    suffix = 2
+    while True:
+        yield f"{base}_{suffix}"
+        suffix += 1
+
+
 def _slug(value: str) -> str:
     return _LOWERCASE_FILE_SAFE_RE.sub("_", value.lower()).strip("_") or "default"
 
@@ -1663,33 +1689,7 @@ class ControlPlaneManager:
             )
         else:
             execute("DELETE FROM cp_agent_definitions WHERE id = ?", (legacy_id,))
-        for table in (
-            "cp_agent_assignments",
-            "cp_agent_config_versions",
-            "cp_agent_connections",
-            "cp_agent_documents",
-            "cp_agent_sections",
-            "cp_apply_operations",
-            "cp_bot_gateway_tokens",
-            "cp_connection_discovery_runs",
-            "cp_knowledge_assets",
-            "cp_mcp_agent_connections",
-            "cp_mcp_capability_policies",
-            "cp_mcp_capability_snapshots",
-            "cp_mcp_discovered_prompts",
-            "cp_mcp_discovered_resources",
-            "cp_mcp_discovered_tools",
-            "cp_mcp_oauth_sessions",
-            "cp_mcp_oauth_tokens",
-            "cp_mcp_tool_policies",
-            "cp_mcp_user_servers",
-            "cp_policy_spend_ledger",
-            "cp_secret_values",
-            "cp_skill_assets",
-            "cp_telegram_offsets",
-            "cp_telegram_pending_updates",
-            "cp_template_assets",
-        ):
+        for table in PER_AGENT_TABLES:
             execute(f"UPDATE {table} SET agent_id = ? WHERE agent_id = ?", (canonical_id, legacy_id))
 
     def _require_agent_row(self, agent_id: str) -> tuple[str, Any]:
@@ -2309,31 +2309,36 @@ class ControlPlaneManager:
     def _apply_workspace_agent_import(self, workspace_id: str, root_path: str, source: Any) -> dict[str, Any]:
         base_name = source.name or Path(source.relative_path).stem
         agent_id = _normalize_agent_id(f"IMPORTED_{workspace_id}_{base_name}")[:64].strip("_")
+        agent_exists = {
+            "created": False,
+            "action": "agent_draft",
+            "agent_id": agent_id,
+            "source_id": source.source_id,
+            "reason": "agent_exists",
+        }
         if fetch_one("SELECT id FROM cp_agent_definitions WHERE id = ?", (agent_id,)) is not None:
-            return {
-                "created": False,
-                "action": "agent_draft",
-                "agent_id": agent_id,
-                "source_id": source.source_id,
-                "reason": "agent_exists",
-            }
-        agent = self.create_agent(
-            {
-                "id": agent_id,
-                "display_name": base_name,
-                "status": "paused",
-                "organization": {"workspace_id": workspace_id, "squad_id": None},
-                "metadata": {
-                    "imported_from": {
-                        "schema_version": WORKSPACE_SCAN_SCHEMA_VERSION,
-                        "source_id": source.source_id,
-                        "tool": source.tool,
-                        "relative_path": source.relative_path,
-                        "risk": source.risk,
-                    }
-                },
-            }
-        )
+            return agent_exists
+        try:
+            agent = self.create_agent(
+                {
+                    "id": agent_id,
+                    "display_name": base_name,
+                    "status": "paused",
+                    "organization": {"workspace_id": workspace_id, "squad_id": None},
+                    "metadata": {
+                        "imported_from": {
+                            "schema_version": WORKSPACE_SCAN_SCHEMA_VERSION,
+                            "source_id": source.source_id,
+                            "tool": source.tool,
+                            "relative_path": source.relative_path,
+                            "risk": source.risk,
+                        }
+                    },
+                }
+            )
+        except AgentIdConflictError:
+            # A concurrent import created the agent after the check above.
+            return agent_exists
         prompt = read_importable_source_content(root_path, source)
         if prompt:
             self.upsert_document(agent_id, "system_prompt_md", {"content_md": prompt})
@@ -3079,7 +3084,8 @@ class ControlPlaneManager:
                 == "agent_grant",
                 "usage_scope": self._global_secret_usage_scope(str(row["secret_key"]), sections=sections),
                 "description": _nonempty_text(secret_meta.get(str(row["secret_key"]).upper(), {}).get("description")),
-                "preview": str(row["preview"] or ""),
+                # A preview stored before M1-E6-T5 is never returned.
+                "preview": "",
                 "updated_at": str(row["updated_at"] or ""),
             }
             for row in rows
@@ -9890,45 +9896,93 @@ class ControlPlaneManager:
         return endpoint
 
     def create_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
-        agent_id = _normalize_agent_id(str(payload.get("id") or ""))
-        display_name = str(payload.get("display_name") or agent_id.replace("_", " "))
-        storage_namespace = str(payload.get("storage_namespace") or _slug(agent_id))
+        """Create an agent, or raise ``AgentIdConflictError`` when its id is taken.
+
+        Without an ``id`` the server generates one from ``display_name``
+        (``_generated_agent_id_candidates``) and allocates the health port.
+        """
+        requested_id = str(payload.get("id") or "").strip()
+        candidates: Iterable[str]
+        if requested_id:
+            candidates = [_normalize_agent_id(requested_id)]
+        else:
+            # One read skips the ids already taken; ON CONFLICT below still covers concurrent creates.
+            taken = {str(row["id"]) for row in fetch_all("SELECT id FROM cp_agent_definitions")}
+            candidates = (
+                candidate
+                for candidate in _generated_agent_id_candidates(str(payload.get("display_name") or ""))
+                if candidate not in taken
+            )
         appearance = _safe_json_object(payload.get("appearance"))
-        runtime_endpoint = self._normalize_runtime_endpoint_for_agent(
-            agent_id,
-            _safe_json_object(payload.get("runtime_endpoint")),
-        )
         metadata = _safe_json_object(payload.get("metadata"))
         status = _normalize_status(str(payload.get("status") or "paused"))
         workspace_id, squad_id = self._resolve_agent_organization(
             _safe_json_object(payload.get("organization")) or None
         )
-        now = now_iso()
-        execute(
-            """
-            INSERT INTO cp_agent_definitions (
-                id, display_name, status, appearance_json, storage_namespace, runtime_endpoint_json,
-                applied_version, desired_version, metadata_json, workspace_id, squad_id, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)
-            ON CONFLICT (id) DO NOTHING
-            """,
-            (
+        for agent_id in candidates:
+            display_name = str(payload.get("display_name") or agent_id.replace("_", " "))
+            storage_namespace = str(payload.get("storage_namespace") or _slug(agent_id))
+            runtime_endpoint = self._normalize_runtime_endpoint_for_agent(
                 agent_id,
-                display_name,
-                status,
-                json_dump(appearance),
-                storage_namespace,
-                json_dump(runtime_endpoint),
-                json_dump(metadata),
-                workspace_id,
-                squad_id,
-                now,
-                now,
-            ),
-        )
-        return self.get_agent(agent_id) or {}
+                _safe_json_object(payload.get("runtime_endpoint")),
+            )
+            now = now_iso()
+            inserted = fetch_one(
+                """
+                INSERT INTO cp_agent_definitions (
+                    id, display_name, status, appearance_json, storage_namespace, runtime_endpoint_json,
+                    applied_version, desired_version, metadata_json, workspace_id, squad_id, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)
+                ON CONFLICT (id) DO NOTHING
+                RETURNING id
+                """,
+                (
+                    agent_id,
+                    display_name,
+                    status,
+                    json_dump(appearance),
+                    storage_namespace,
+                    json_dump(runtime_endpoint),
+                    json_dump(metadata),
+                    workspace_id,
+                    squad_id,
+                    now,
+                    now,
+                ),
+            )
+            if inserted is not None:
+                return self.get_agent(agent_id) or {}
+            if requested_id:
+                raise AgentIdConflictError(agent_id)
+        raise AssertionError("unreachable: generated agent id candidates never run out")
 
     def update_agent(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Apply a PATCH. A ``status`` change goes through the lifecycle methods.
+
+        ``pause_agent`` and ``activate_agent`` roll the queue back, wake the
+        supervisor and write the audit row; writing ``status`` directly skipped
+        all three (D-150). A change to any other status is rejected.
+        """
+        fields = dict(payload)
+        requested_status = str(fields.pop("status", None) or "").strip()
+        normalized, current = self._require_agent_row(agent_id)
+        current_status = str(current["status"])
+        target_status = _normalize_status(requested_status) if requested_status else current_status
+        if target_status != current_status and target_status not in {"active", "paused"}:
+            raise ValueError(
+                f"status can only change to active or paused here, not {target_status}; "
+                "use the pause and activate endpoints for lifecycle changes"
+            )
+        if target_status == current_status:
+            return self._update_agent_definition(normalized, fields)
+        if fields:
+            self._update_agent_definition(normalized, fields)
+        if target_status == "paused":
+            return self.pause_agent(normalized)
+        return self.activate_agent(normalized)
+
+    def _update_agent_definition(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Write the agent definition row, ``status`` included. Lifecycle side effects are the caller's."""
         normalized, current = self._require_agent_row(agent_id)
         display_name = str(payload.get("display_name") or current["display_name"])
         status = _normalize_status(str(payload.get("status") or current["status"]))
@@ -9975,25 +10029,6 @@ class ControlPlaneManager:
         )
         return True
 
-    # Tables that hold per-agent state and must be purged on hard delete.
-    # Order does not matter — each row is scoped by agent_id — but cp_agent_definitions
-    # is written last so the main row survives if any cascade step fails.
-    _AGENT_CASCADE_TABLES: tuple[str, ...] = (
-        "cp_agent_sections",
-        "cp_agent_documents",
-        "cp_agent_config_versions",
-        "cp_apply_operations",
-        "cp_knowledge_assets",
-        "cp_template_assets",
-        "cp_skill_assets",
-        "cp_mcp_agent_connections",
-        "cp_mcp_tool_policies",
-        "cp_mcp_discovered_tools",
-        "cp_mcp_oauth_tokens",
-        "cp_mcp_oauth_sessions",
-        "cp_agent_connections",
-    )
-
     def delete_agent(self, agent_id: str) -> bool:
         """Hard-delete an agent and every dependent cp_* row.
 
@@ -10006,7 +10041,10 @@ class ControlPlaneManager:
             normalized, _ = self._require_agent_row(agent_id)
         except KeyError:
             return False
-        for table in self._AGENT_CASCADE_TABLES:
+        # cp_agent_definitions is deleted last so the main row survives if a
+        # cascade step fails. AGENT_DELETE_TABLES is not yet every per-agent
+        # table (D-054).
+        for table in AGENT_DELETE_TABLES:
             execute(f"DELETE FROM {table} WHERE agent_id = ?", (normalized,))
         execute("DELETE FROM cp_agent_definitions WHERE id = ?", (normalized,))
         return True
@@ -10015,19 +10053,20 @@ class ControlPlaneManager:
         source = self.get_agent(agent_id)
         if source is None:
             raise KeyError(agent_id)
-        target_id = _normalize_agent_id(str(payload.get("id") or ""))
+        # Raises AgentIdConflictError before anything is copied when the id is taken.
         cloned = self.create_agent(
             {
-                "id": target_id,
+                "id": payload.get("id"),
                 "display_name": payload.get("display_name") or f"{source['display_name']} Copy",
                 "appearance": source.get("appearance"),
-                "storage_namespace": payload.get("storage_namespace") or _slug(target_id),
+                "storage_namespace": payload.get("storage_namespace"),
                 "runtime_endpoint": source.get("runtime_endpoint"),
                 "status": payload.get("status") or "paused",
                 "metadata": source.get("metadata"),
                 "organization": payload["organization"] if "organization" in payload else source.get("organization"),
             }
         )
+        target_id = str(cloned["id"])
         for section, data in source.get("sections", {}).items():
             self.put_section(target_id, section, {"data": data})
         for kind, content in source.get("documents", {}).items():
@@ -10050,7 +10089,7 @@ class ControlPlaneManager:
         return cloned
 
     def activate_agent(self, agent_id: str) -> dict[str, Any]:
-        result = self.update_agent(agent_id, {"status": "active"})
+        result = self._update_agent_definition(agent_id, {"status": "active"})
         # Wake the supervisor immediately so the worker spawns without
         # waiting for the next poll cycle. Items previously rolled back to
         # 'queued' by ``pause_agent`` will be picked up by the fresh runtime.
@@ -10065,7 +10104,7 @@ class ControlPlaneManager:
         return result
 
     def pause_agent(self, agent_id: str) -> dict[str, Any]:
-        result = self.update_agent(agent_id, {"status": "paused"})
+        result = self._update_agent_definition(agent_id, {"status": "paused"})
         # Rollback every in-flight queue item to ``queued`` so the operator
         # can resume from a clean slate. The runtime worker is killed by
         # the supervisor (no idle wait); without this rollback the killed
@@ -12132,7 +12171,8 @@ class ControlPlaneManager:
             (
                 normalized_secret_key,
                 encrypt_secret(value),
-                mask_secret(value),
+                # No masked preview is stored (M1-E6-T5); the column keeps its empty default.
+                "",
                 now,
                 now,
             ),
@@ -12479,7 +12519,8 @@ class ControlPlaneManager:
                 normalized,
                 normalized_secret_key,
                 encrypt_secret(value),
-                mask_secret(value),
+                # No masked preview is stored (M1-E6-T5); the column keeps its empty default.
+                "",
                 now,
                 now,
             ),
@@ -13313,7 +13354,7 @@ class ControlPlaneManager:
             resolved[secret_key] = {
                 "scope": scope,
                 "encrypted_value": str(row["encrypted_value"]),
-                "preview": str(row["preview"]),
+                "preview": "",
             }
         return resolved
 
@@ -13326,7 +13367,8 @@ class ControlPlaneManager:
             secret_payload = _safe_json_object(payload)
             secrets[str(secret_key)] = {
                 "scope": str(secret_payload.get("scope") or "agent"),
-                "preview": str(secret_payload.get("preview") or ""),
+                # Snapshots published before M1-E6-T5 still hold a masked preview; never return it.
+                "preview": "",
                 "present": True,
             }
         sanitized["secrets"] = secrets

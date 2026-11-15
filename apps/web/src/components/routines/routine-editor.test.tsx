@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/components/providers/i18n-provider";
 import { AgentCatalogProvider } from "@/components/providers/agent-catalog-provider";
 import { RoutineEditor } from "@/components/routines/routine-editor";
@@ -66,11 +66,33 @@ beforeAll(() => {
   }
 });
 
+// The schedule step asks the scheduler to validate and preview the schedule (D-080).
+let previewResponse: () => Response = () => json({ next_runs: [] });
+const previewFetch = vi.fn(async () => previewResponse());
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function previewRequests() {
+  return previewFetch.mock.calls.map(([input]) => new URL(String(input), "http://localhost"));
+}
+
 beforeEach(() => {
   // The i18n provider persists the active language; reset it so each test renders the
   // language it asks for.
   window.localStorage.clear();
   document.cookie = `${LOCALE_COOKIE_KEY}=; path=/; max-age=0`;
+  previewResponse = () => json({ next_runs: [] });
+  previewFetch.mockClear();
+  vi.stubGlobal("fetch", previewFetch);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 const AGENTS: AgentDisplay[] = [
@@ -213,6 +235,49 @@ describe("RoutineEditor", () => {
     expect(payload.verificationMode).toBe("post_write_if_any");
   });
 
+  // Next and the submit button are distinct elements (D-268), so Next unmounts on Schedule ->
+  // Refine. Focus must land on the submit button inside the dialog, not fall to the page body.
+  it.each(["create", "edit"] as const)(
+    "keeps keyboard focus inside the dialog when Next reaches Refine (%s)",
+    async (mode) => {
+      const job: CronJob = {
+        id: 7,
+        bot_id: "alpha",
+        user_id: 1,
+        chat_id: null,
+        cron_expression: "0 9 * * *",
+        trigger_type: "cron",
+        schedule_expr: "0 9 * * *",
+        timezone: "UTC",
+        command: "Check deploy health",
+        description: "",
+        created_at: null,
+        enabled: 1,
+        status: "active",
+        work_dir: "/repo",
+        payload: { name: "Deploy health", query: "Check deploy health" },
+      };
+      renderEditor(mode === "edit" ? { mode, job, onDelete: vi.fn() } : { mode });
+      if (mode === "create") fillBasics();
+      const dialog = await screen.findByRole("dialog");
+
+      const next = screen.getByRole("button", { name: /next/i });
+      next.focus();
+      fireEvent.click(next);
+      expect(await screen.findByText(/^schedule$/i)).toBeInTheDocument();
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: /next/i }));
+
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      const submit = await screen.findByRole("button", {
+        name: mode === "create" ? /create routine/i : /save changes/i,
+      });
+      expect(document.activeElement).toBe(submit);
+      expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    },
+  );
+
+  // D-063: the name lives in `payload.name`. Runtime responses put the query text in
+  // `summary`, so the editor must not read the name from there.
   it("prefills Basics step in edit mode from an existing job", async () => {
     const job: CronJob = {
       id: 42,
@@ -223,7 +288,7 @@ describe("RoutineEditor", () => {
       trigger_type: "cron",
       schedule_expr: "30 8 * * 1",
       timezone: "America/Sao_Paulo",
-      summary: "Weekly status",
+      summary: "Generate weekly status report",
       command: "Generate weekly status report",
       description: "",
       created_at: null,
@@ -232,7 +297,7 @@ describe("RoutineEditor", () => {
       work_dir: "/repo",
       provider_preference: "anthropic",
       model_preference: "claude-opus-4-7",
-      payload: { query: "Generate weekly status report" },
+      payload: { name: "Weekly status", query: "Generate weekly status report" },
       notification_policy: { mode: "failures_only" },
       verification_policy: { mode: "task_success" },
     };
@@ -246,6 +311,66 @@ describe("RoutineEditor", () => {
     expect(
       screen.getByPlaceholderText(/Describe what the agent should do/i),
     ).toHaveValue("Generate weekly status report");
+  });
+
+  // Routines created outside the dashboard (Telegram /cron, agent tools, reminders) have no
+  // `payload.name`; the editor shows the same fallback title as the table instead of a blank name.
+  it("falls back to the summary when the job has no stored name", async () => {
+    const job: CronJob = {
+      id: 7,
+      bot_id: "beta",
+      user_id: 1,
+      chat_id: 1,
+      cron_expression: "0 * * * *",
+      trigger_type: "cron",
+      schedule_expr: "0 * * * *",
+      timezone: "UTC",
+      summary: "Check deploy health",
+      command: "Check deploy health",
+      description: "",
+      created_at: null,
+      enabled: 1,
+      status: "active",
+      work_dir: "/repo",
+      payload: { query: "Check deploy health" },
+    };
+
+    renderEditor({ mode: "edit", job });
+
+    expect(await screen.findByText(/Edit routine #7/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Daily code review/i)).toHaveValue("Check deploy health");
+  });
+
+  // With neither a name nor a summary, the table labels the routine with its truncated command;
+  // the editor opens with that same label, and nothing is written until the user saves.
+  it("falls back to the table's command label when there is no name or summary", async () => {
+    const command = "Run the nightly release checklist against every staging environment, then report";
+    const job: CronJob = {
+      id: 8,
+      bot_id: "beta",
+      user_id: 1,
+      chat_id: 1,
+      cron_expression: "0 * * * *",
+      trigger_type: "cron",
+      schedule_expr: "0 * * * *",
+      timezone: "UTC",
+      summary: "",
+      command,
+      description: "",
+      created_at: null,
+      enabled: 1,
+      status: "active",
+      work_dir: "/repo",
+      payload: {},
+    };
+
+    const { onSubmit } = renderEditor({ mode: "edit", job });
+
+    expect(await screen.findByText(/Edit routine #8/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Daily code review/i)).toHaveValue(
+      `${command.slice(0, 56)}…`,
+    );
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it("uses defaultTimezone when provided", async () => {
@@ -264,6 +389,148 @@ describe("RoutineEditor", () => {
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0][0].timezone).toBe("America/Sao_Paulo");
+  });
+
+  // TD-160, F-SCH-08: runs never read payload.connectors, so the picker must not suggest
+  // that connectors apply. It stays visible, disabled and labelled until a backend uses it.
+  it.each(SUPPORTED_LANGUAGES)("shows the connectors picker as not available yet in %s", async (language) => {
+    const unavailable = tr(language, "routines.editor.connectors.unavailable");
+    expect(unavailable).not.toBe("routines.editor.connectors.unavailable");
+
+    renderEditor({}, language);
+    fillBasics(language);
+    const next = tr(language, "routines.editor.actions.next");
+    fireEvent.click(await screen.findByRole("button", { name: next }));
+    fireEvent.click(await screen.findByRole("button", { name: next }));
+
+    expect(await screen.findByText(unavailable)).toBeInTheDocument();
+    expect(
+      screen.getByText(tr(language, "routines.editor.connectors.unavailableDescription")),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: tr(language, "routines.editor.connectors.addAction") }),
+    ).toBeDisabled();
+    const rendered = document.body.textContent ?? "";
+    expect(rendered).not.toContain(tr(language, "routines.editor.connectors.description"));
+    expect(rendered).not.toContain(tr(language, "routines.editor.connectors.empty"));
+  });
+
+  describe("schedule step (D-080, D-081)", () => {
+    function scheduledJob(overrides: Partial<CronJob>): CronJob {
+      return {
+        id: 9,
+        bot_id: "alpha",
+        user_id: 1,
+        chat_id: null,
+        cron_expression: "",
+        trigger_type: "cron",
+        schedule_expr: "",
+        timezone: "UTC",
+        command: "Sweep the docs",
+        description: "",
+        created_at: null,
+        enabled: 1,
+        status: "active",
+        work_dir: "/repo",
+        payload: { name: "Docs sweep", query: "Sweep the docs" },
+        ...overrides,
+      };
+    }
+
+    async function saveFromSchedule() {
+      fireEvent.click(await screen.findByRole("button", { name: /next/i }));
+      fireEvent.click(await screen.findByRole("button", { name: /save/i }));
+    }
+
+    it("accepts a step cron and previews the scheduler's runs in the routine's zone", async () => {
+      previewResponse = () =>
+        json({
+          next_runs: [
+            "2026-12-01T12:00:00+00:00",
+            "2026-12-01T12:05:00+00:00",
+            "2026-12-01T12:10:00+00:00",
+          ],
+        });
+      const { onSubmit } = renderEditor({
+        mode: "edit",
+        job: scheduledJob({
+          schedule_expr: "*/5 * * * *",
+          cron_expression: "*/5 * * * *",
+          timezone: "America/Sao_Paulo",
+        }),
+      });
+      fireEvent.click(await screen.findByRole("button", { name: /next/i }));
+
+      expect(await screen.findByText(/09:00/)).toBeInTheDocument();
+      expect(screen.getByText(/09:05/)).toBeInTheDocument();
+      const [request] = previewRequests();
+      expect(request.pathname).toBe("/api/runtime/agents/alpha/schedules/preview");
+      expect(request.searchParams.get("trigger_type")).toBe("cron");
+      expect(request.searchParams.get("schedule_expr")).toBe("*/5 * * * *");
+      expect(request.searchParams.get("timezone")).toBe("America/Sao_Paulo");
+
+      await saveFromSchedule();
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      expect(onSubmit.mock.calls[0][0]).toMatchObject({
+        triggerType: "cron",
+        scheduleExpr: "*/5 * * * *",
+        timezone: "America/Sao_Paulo",
+      });
+    });
+
+    it("blocks the schedule step with the scheduler's reason", async () => {
+      const reason = "Invalid schedule expression for cron: [61 * * * *] is not acceptable";
+      previewResponse = () => json({ error: reason }, 422);
+      const { onSubmit } = renderEditor({
+        mode: "edit",
+        job: scheduledJob({ schedule_expr: "61 * * * *", cron_expression: "61 * * * *" }),
+      });
+      fireEvent.click(await screen.findByRole("button", { name: /next/i }));
+
+      expect(await screen.findByText(reason)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      await waitFor(() => expect(screen.getAllByText(reason)).toHaveLength(2));
+      expect(screen.queryByRole("button", { name: /save/i })).not.toBeInTheDocument();
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it("keeps an interval trigger as an interval", async () => {
+      const { onSubmit } = renderEditor({
+        mode: "edit",
+        job: scheduledJob({ trigger_type: "interval", schedule_expr: "3600", cron_expression: "3600" }),
+      });
+      fireEvent.click(await screen.findByRole("button", { name: /next/i }));
+
+      expect(await screen.findByDisplayValue("3600")).toBeInTheDocument();
+      await waitFor(() =>
+        expect(previewRequests().at(-1)?.searchParams.get("trigger_type")).toBe("interval"),
+      );
+      await saveFromSchedule();
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      expect(onSubmit.mock.calls[0][0]).toMatchObject({ triggerType: "interval", scheduleExpr: "3600" });
+    });
+
+    it("shows and saves a one-shot time in the routine's zone", async () => {
+      const { onSubmit } = renderEditor({
+        mode: "edit",
+        job: scheduledJob({
+          trigger_type: "one_shot",
+          schedule_expr: "2026-12-01T00:00:00+00:00",
+          cron_expression: "",
+          timezone: "Asia/Tokyo",
+        }),
+      });
+      fireEvent.click(await screen.findByRole("button", { name: /next/i }));
+
+      expect(await screen.findByText("09:00")).toBeInTheDocument();
+      await saveFromSchedule();
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      expect(onSubmit.mock.calls[0][0]).toMatchObject({
+        triggerType: "one_shot",
+        scheduleExpr: "2026-12-01T00:00:00.000Z",
+        timezone: "Asia/Tokyo",
+      });
+    });
   });
 
   // D-006 interim mitigation (M1-E8-T1): runs ignore read-only and allowed paths, so the
@@ -286,7 +553,7 @@ describe("RoutineEditor", () => {
         enabled: 1,
         status: "active",
         work_dir: "/repo",
-        payload: { query: "Sweep the docs", ...payload },
+        payload: { name: "Docs sweep", query: "Sweep the docs", ...payload },
       };
     }
 
@@ -333,6 +600,8 @@ describe("RoutineEditor", () => {
       ["has no payload", { ...existingJob({}), payload: undefined }],
     ])("shows an existing routine that %s as off and empty", async (_case, job) => {
       renderEditor({ mode: "edit", job });
+      // A routine without a payload has no stored name, so Basics needs one before Next.
+      fillBasics();
       await openPermissionsTab();
 
       const { readOnly, allowedPaths } = permissionControls();

@@ -38,7 +38,7 @@ from .dashboard_service import (
     list_dashboard_execution_summaries,
     list_dashboard_schedules,
 )
-from .manager import GeneralPayloadValidationError, get_control_plane_manager
+from .manager import AgentIdConflictError, GeneralPayloadValidationError, get_control_plane_manager
 from .onboarding import load_control_plane_openapi_spec
 from .operator_auth import (
     AuthError,
@@ -409,6 +409,8 @@ async def control_plane_error_middleware(
         return await handler(request)
     except AuthError as exc:
         return web.json_response({"error": str(exc)}, status=401)
+    except AgentIdConflictError as exc:
+        return web.json_response({"error": str(exc)}, status=409)
     except KeyError:
         return web.json_response({"error": "agent or asset not found"}, status=404)
     except ValueError as exc:
@@ -3045,6 +3047,7 @@ async def list_dashboard_schedules_route(request: web.Request) -> web.Response:
             _query_agent_ids(request) or None,
             limit=limit + 1 if paged else limit,
             offset=offset,
+            include_archived=bool(_query_bool(request, "include_archived")),
         )
         return web.json_response(_paginated_list_payload(items, limit=limit, offset=offset) if paged else items)
     except RuntimeError as exc:

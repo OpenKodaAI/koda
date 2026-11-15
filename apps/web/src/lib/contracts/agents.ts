@@ -10,11 +10,13 @@ import {
 
 /*  Schemas                                                            */
 
+// The control plane generates `id`, `storage_namespace` and the health port
+// when they are absent, and answers 409 when a given `id` is taken.
 export const createAgentBodySchema = z.object({
-  id: safeIdentifier(120),
+  id: safeIdentifier(120).optional(),
   display_name: safeText(240),
   status: z.enum(["active", "paused"]).default("paused"),
-  storage_namespace: safeIdentifier(120),
+  storage_namespace: safeIdentifier(120).optional(),
   appearance: z.object({
     label: safeText(240),
     color: hexColor(),
@@ -26,7 +28,8 @@ export const createAgentBodySchema = z.object({
       health_url: z.string().trim().max(500),
       runtime_base_url: z.string().trim().max(500),
     })
-    .passthrough(),
+    .passthrough()
+    .optional(),
 }).passthrough();
 
 export const patchAgentBodySchema = z.object({
@@ -39,7 +42,7 @@ export const patchAgentBodySchema = z.object({
 }).passthrough();
 
 export const cloneAgentBodySchema = z.object({
-  id: safeIdentifier(120),
+  id: safeIdentifier(120).optional(),
   display_name: safeText(240),
 });
 

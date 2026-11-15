@@ -652,6 +652,45 @@ def _validated_next_run(
     return next_run
 
 
+def preview_schedule(
+    *,
+    trigger_type: str,
+    schedule_expr: str,
+    timezone_name: str,
+    job_type: str = "agent_query",
+    count: int = 3,
+) -> list[datetime]:
+    """Validate a schedule like create and update do, and return its next UTC run times.
+
+    The first entry is the ``next_run_at`` the scheduler would store (D-080, D-081).
+    Raises ``ValueError`` with the scheduler's reason when the schedule is invalid.
+    """
+    timezone_name = _normalize_timezone_name(timezone_name)
+    # _validated_next_run raises instead of returning None.
+    runs = [
+        cast(
+            datetime,
+            _validated_next_run(
+                job_type=job_type,
+                trigger_type=trigger_type,
+                schedule_expr=schedule_expr,
+                timezone_name=timezone_name,
+            ),
+        )
+    ]
+    while len(runs) < count:
+        following = compute_next_run(
+            trigger_type=trigger_type,
+            schedule_expr=schedule_expr,
+            timezone_name=timezone_name,
+            after=runs[-1],
+        )
+        if following is None:
+            break
+        runs.append(following)
+    return runs
+
+
 def _update_run_metadata(run_id: int, updater: Any) -> dict[str, Any] | None:
     run = _get_run(run_id)
     if not run:
@@ -1444,6 +1483,7 @@ def update_job(
                 f"Expected version {expected_config_version}, found {current_config_version}."
             ),
             "config_version": current_config_version,
+            "conflict": True,
         }
 
     before = _job_audit_snapshot(job)
@@ -1516,6 +1556,9 @@ def update_job(
             return {"ok": False, "message": "Shell command jobs require a read-only command for safe activation."}
     else:
         return {"ok": False, "message": f"Unsupported job type: {job_type}"}
+
+    if "name" in normalized_patch:
+        payload["name"] = str(normalized_patch.get("name") or "").strip()
 
     payload["provider"] = provider_preference
     payload["model"] = model_preference

@@ -118,8 +118,12 @@ start.
       lets it choose its own rate-limit bucket.
 - [ ] Sidecar gRPC ports (`50061`–`50067`) are loopback / private
       network only — never publicly exposed.
-- [ ] If running multi-host: `GRPC_TLS_ENABLED=true` for sidecar
-      mTLS. Single-host loopback can stay `false`.
+- [ ] Sidecar gRPC traffic is not encrypted, so on more than one host it
+      runs only over a private network or an encrypted tunnel you control.
+      `GRPC_TLS_ENABLED` was removed because only two sidecars served TLS:
+      Koda refuses to start with `GRPC_TLS_ENABLED=true`, and the security
+      and memory sidecars refuse `GRPC_TLS_SERVER_CERT` and
+      `GRPC_TLS_SERVER_KEY`. Remove those settings.
 
 ## Browser sandbox
 

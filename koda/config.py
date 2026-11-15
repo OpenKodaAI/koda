@@ -1752,8 +1752,15 @@ SNAPSHOT_RETENTION_HOURS: int = int(_env("SNAPSHOT_RETENTION_HOURS", "168"))
 PLUGIN_SYSTEM_ENABLED: bool = _env("PLUGIN_SYSTEM_ENABLED", "false").lower() == "true"
 PLUGIN_SANDBOX_ENABLED: bool = _env("PLUGIN_SANDBOX_ENABLED", "true").lower() == "true"
 
-# --- gRPC TLS ---
-GRPC_TLS_ENABLED: bool = _env("GRPC_TLS_ENABLED", "false").lower() == "true"
-GRPC_TLS_CA_CERT: str = (_env("GRPC_TLS_CA_CERT") or "").strip()
-GRPC_TLS_CLIENT_CERT: str = (_env("GRPC_TLS_CLIENT_CERT") or "").strip()
-GRPC_TLS_CLIENT_KEY: str = (_env("GRPC_TLS_CLIENT_KEY") or "").strip()
+# --- gRPC TLS (removed, M1-E6-T2) ---
+# GRPC_TLS_ENABLED switched every internal gRPC channel to TLS, but only the
+# security and memory sidecars could serve TLS, so it broke every other
+# sidecar connection. It is refused rather than ignored, so nobody takes the
+# sidecar traffic for encrypted.
+if (_env("GRPC_TLS_ENABLED") or "").strip().lower() == "true":
+    raise RuntimeError(
+        "GRPC_TLS_ENABLED is no longer supported: internal gRPC traffic is not encrypted, and the switch "
+        "broke most sidecar connections. Remove GRPC_TLS_ENABLED, GRPC_TLS_CA_CERT, GRPC_TLS_CLIENT_CERT "
+        "and GRPC_TLS_CLIENT_KEY from the environment, and keep the sidecar ports on loopback, a Unix "
+        "socket or a private network (docs/operations/hardening.md)."
+    )

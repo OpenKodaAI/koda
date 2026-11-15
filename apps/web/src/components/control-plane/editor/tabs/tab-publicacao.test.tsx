@@ -1,7 +1,9 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentEditorProvider } from "@/hooks/use-agent-editor";
 import { ToastProvider } from "@/hooks/use-toast";
+import { ToastNotification } from "@/components/ui/toast-notification";
 import { TabPublicacao } from "@/components/control-plane/editor/tabs/tab-publicacao";
 import type {
   ControlPlaneAgent,
@@ -14,8 +16,10 @@ import type {
   ControlPlaneWorkspaceTree,
 } from "@/lib/control-plane";
 
+const pushMock = vi.fn();
+
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
+  useRouter: () => ({ refresh: vi.fn(), push: pushMock }),
 }));
 
 vi.mock("@/hooks/use-app-i18n", async () => {
@@ -181,9 +185,11 @@ function makeCompiledPromptPayload(
 function renderTab(
   agent = makeAgent(),
   compiledPromptPayload: ControlPlaneCompiledPrompt | null = makeCompiledPromptPayload(),
+  withToasts = false,
 ) {
   return render(
     <ToastProvider>
+      {withToasts ? <ToastNotification /> : null}
       <AgentEditorProvider
         agent={agent}
         compiledPromptPayload={compiledPromptPayload}
@@ -219,6 +225,60 @@ describe("TabPublicacao", () => {
     renderTab();
 
     expect(screen.getByRole("button", { name: "Remover agente" })).toBeInTheDocument();
+  });
+
+  describe("clone", () => {
+    const originalFetch = globalThis.fetch;
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+      pushMock.mockReset();
+    });
+
+    function answerClone(body: unknown, status: number) {
+      const fetchMock = vi.fn(() =>
+        Promise.resolve(
+          new Response(JSON.stringify(body), {
+            status,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+      return fetchMock;
+    }
+
+    async function cloneAs(name: string) {
+      const user = userEvent.setup();
+      renderTab(makeAgent(), makeCompiledPromptPayload(), true);
+      await user.click(screen.getByRole("button", { name: /Clonar agente/ }));
+      await user.type(await screen.findByLabelText("Nome do clone"), name);
+      await user.click(screen.getByRole("button", { name: "Clonar" }));
+    }
+
+    it("sends only the name and opens the id the server generated", async () => {
+      const fetchMock = answerClone({ id: "ATLAS_BETA" }, 201);
+
+      await cloneAs("Atlas Beta");
+
+      await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/control-plane/agents/ATLAS_BETA"));
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/control-plane/agents/ATLAS/clone",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ display_name: "Atlas Beta" }),
+        }),
+      );
+    });
+
+    it("shows the id conflict when the server answers 409", async () => {
+      answerClone({ error: "agent id ATLAS_BETA already exists" }, 409);
+
+      await cloneAs("Atlas Beta");
+
+      expect(await screen.findByText("Já existe um agente com este ID.")).toBeInTheDocument();
+      expect(pushMock).not.toHaveBeenCalled();
+    });
   });
 
   it("shows the active lifecycle label when no pending changes exist", () => {

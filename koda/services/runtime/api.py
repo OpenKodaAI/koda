@@ -372,6 +372,31 @@ async def _runtime_schedule_detail(request: web.Request) -> web.Response:
     return web.json_response(payload)
 
 
+async def _runtime_schedule_preview(request: web.Request) -> web.Response:
+    """Validate a schedule and preview its next runs, as the scheduler computes them."""
+    auth = _authorize_runtime_access(request)
+    if auth:
+        return auth
+    from koda.services import scheduled_jobs
+
+    trigger_type = str(request.query.get("trigger_type") or "").strip()
+    if trigger_type not in {"cron", "interval", "one_shot"}:
+        return web.json_response(
+            {"error": "trigger_type must be one of cron, interval, one_shot", "field": "trigger_type"},
+            status=422,
+        )
+    try:
+        runs = scheduled_jobs.preview_schedule(
+            trigger_type=trigger_type,
+            schedule_expr=str(request.query.get("schedule_expr") or "").strip(),
+            timezone_name=str(request.query.get("timezone") or "").strip(),
+        )
+    except ValueError as exc:
+        field = "timezone" if str(exc).startswith("Invalid timezone") else "schedule_expr"
+        return web.json_response({"error": str(exc), "field": field}, status=422)
+    return web.json_response({"next_runs": [run.isoformat() for run in runs]})
+
+
 async def _runtime_schedule_update(request: web.Request) -> web.Response:
     auth = _authorize_mutation(request)
     if auth:
@@ -396,7 +421,8 @@ async def _runtime_schedule_update(request: web.Request) -> web.Response:
         if isinstance(payload.get("evidence"), dict)
         else None,
     )
-    status = 200 if result.get("ok") else 400
+    # A version conflict answers 409 so the dashboard can reload the routine (D-122).
+    status = 200 if result.get("ok") else 409 if result.get("conflict") else 400
     if result.get("ok"):
         detail = _schedule_detail_payload(int(request.match_info["job_id"]))
         result = {**result, **(detail or {})}
@@ -1879,6 +1905,7 @@ def setup_runtime_routes(app: web.Application) -> None:
     app.router.add_get("/api/runtime/environments", _runtime_environments)
     app.router.add_get("/api/runtime/schedules", _runtime_schedules)
     app.router.add_post("/api/runtime/schedules", _runtime_schedule_create)
+    app.router.add_get("/api/runtime/schedules/preview", _runtime_schedule_preview)
     app.router.add_get("/api/runtime/schedules/{job_id:\\d+}", _runtime_schedule_detail)
     app.router.add_get("/api/runtime/environments/{env_id:\\d+}", _runtime_environment_detail)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}", _runtime_task_detail)

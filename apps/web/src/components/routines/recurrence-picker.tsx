@@ -15,10 +15,9 @@ import { TimezonePicker } from "@/components/ui/timezone-picker";
 import { DatePicker } from "@/components/routines/date-picker";
 import { TimePicker } from "@/components/routines/time-picker";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import type { SchedulePreview } from "@/hooks/use-schedule-preview";
 import {
-  computeNextRuns,
   cronToPreset,
-  validateCron,
   type RecurrenceFields,
   type RecurrencePreset,
 } from "@/lib/routines/recurrence";
@@ -39,16 +38,29 @@ export interface RecurrencePickerValue {
   oneShotAt: string;
   recurrence: RecurrenceFields;
   customCron: string;
+  intervalExpr: string;
   timezone: string;
 }
 
 interface RecurrencePickerProps {
   value: RecurrencePickerValue;
   onChange: (next: RecurrencePickerValue) => void;
+  /** The scheduler's validation and next runs for the recurring schedule (D-080, D-081). */
+  preview: SchedulePreview;
+  /** Offer the interval preset; only routines that already run on an interval keep it. */
+  allowInterval?: boolean;
   disabled?: boolean;
 }
 
 const PRESETS: RecurrencePreset[] = ["hourly", "daily", "weekly", "monthly", "custom"];
+const PRESETS_WITH_INTERVAL: RecurrencePreset[] = [
+  "hourly",
+  "daily",
+  "weekly",
+  "monthly",
+  "interval",
+  "custom",
+];
 
 function patch<T extends object>(value: T, partial: Partial<T>): T {
   return { ...value, ...partial };
@@ -216,7 +228,13 @@ function CronCells({ cron, onChange, disabled, t }: CronCellsProps) {
   );
 }
 
-export function RecurrencePicker({ value, onChange, disabled = false }: RecurrencePickerProps) {
+export function RecurrencePicker({
+  value,
+  onChange,
+  preview,
+  allowInterval = false,
+  disabled = false,
+}: RecurrencePickerProps) {
   const { t, i18n } = useAppI18n();
   const locale = i18n.language || "en-US";
 
@@ -225,20 +243,12 @@ export function RecurrencePicker({ value, onChange, disabled = false }: Recurren
     return cronToPreset(value.customCron || "");
   }, [value.recurrence.preset, value.customCron]);
 
-  const cronError = useMemo(() => {
-    if (value.recurrence.preset !== "custom") return null;
-    if (!value.customCron) return null;
-    return validateCron(value.customCron);
-  }, [value.recurrence.preset, value.customCron]);
-
-  const nextRuns = useMemo(() => {
-    if (value.scheduleMode !== "recurring") return [];
-    if (value.recurrence.preset === "custom") {
-      if (cronError) return [];
-      return detectedFromCustom ? computeNextRuns(detectedFromCustom, 3) : [];
-    }
-    return computeNextRuns(value.recurrence, 3);
-  }, [value.scheduleMode, value.recurrence, detectedFromCustom, cronError]);
+  // The scheduler validates the expression; its reason is shown as is.
+  const scheduleError =
+    preview.status === "invalid"
+      ? preview.message || t("routines.editor.validation.cronInvalid")
+      : null;
+  const nextRuns = value.scheduleMode === "recurring" ? preview.nextRuns : [];
 
   return (
     <div className="flex flex-col gap-4">
@@ -296,7 +306,7 @@ export function RecurrencePicker({ value, onChange, disabled = false }: Recurren
       ) : (
         <div className="flex flex-col gap-4">
           <SoftTabs
-            items={PRESETS.map((preset) => ({
+            items={(allowInterval ? PRESETS_WITH_INTERVAL : PRESETS).map((preset) => ({
               id: preset,
               label: t(`routines.editor.presets.${preset}`),
             }))}
@@ -313,7 +323,34 @@ export function RecurrencePicker({ value, onChange, disabled = false }: Recurren
             className="self-start"
           />
 
-          {value.recurrence.preset !== "hourly" && value.recurrence.preset !== "custom" ? (
+          {value.recurrence.preset === "interval" ? (
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[0.75rem] font-medium text-[var(--text-tertiary)]">
+                {t("routines.editor.interval")}
+              </span>
+              <Input
+                value={value.intervalExpr}
+                onChange={(event) => onChange(patch(value, { intervalExpr: event.target.value }))}
+                disabled={disabled}
+                spellCheck={false}
+                autoCapitalize="off"
+                autoCorrect="off"
+                className="font-mono"
+              />
+              <span
+                className={cn(
+                  "min-h-[1.05rem] text-[0.8125rem]",
+                  scheduleError ? "text-[var(--tone-danger-text)]" : "text-[var(--text-tertiary)]",
+                )}
+              >
+                {scheduleError ?? t("routines.editor.intervalHint")}
+              </span>
+            </label>
+          ) : null}
+
+          {value.recurrence.preset !== "hourly" &&
+          value.recurrence.preset !== "custom" &&
+          value.recurrence.preset !== "interval" ? (
             <div className="grid gap-3 md:grid-cols-2">
               <label className="flex flex-col gap-1.5">
                 <span className="text-[0.75rem] font-medium text-[var(--text-tertiary)]">
@@ -402,17 +439,15 @@ export function RecurrencePicker({ value, onChange, disabled = false }: Recurren
               <span
                 className={cn(
                   "min-h-[1.05rem] text-[0.8125rem] transition-colors duration-[120ms]",
-                  cronError
+                  scheduleError
                     ? "text-[var(--tone-danger-text)]"
                     : detectedFromCustom
                       ? "text-[var(--text-secondary)]"
                       : "text-[var(--text-quaternary)]",
                 )}
               >
-                {cronError
-                  ? t(`routines.editor.cronErrors.${cronError.code}`, {
-                      cell: t(`routines.editor.cron.${cronError.cell}`),
-                    })
+                {scheduleError
+                  ? scheduleError
                   : detectedFromCustom
                     ? humanizeRecurrence(detectedFromCustom, t)
                     : t("routines.editor.customCronHint")}
@@ -453,11 +488,7 @@ export function RecurrencePicker({ value, onChange, disabled = false }: Recurren
                 ))}
               </ol>
             </div>
-          ) : value.recurrence.preset === "custom" ? null : (
-            <span className="text-[0.8125rem] text-[var(--text-tertiary)]">
-              {t("routines.editor.nextRunsUnavailable")}
-            </span>
-          )}
+          ) : null}
         </div>
       )}
     </div>

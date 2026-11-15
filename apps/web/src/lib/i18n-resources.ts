@@ -10222,6 +10222,7 @@ mutableResources["en-US"].translation.controlPlane = {
   agent: {
     loadTitle: "Failed to load {{agentId}}",
     loadDescription: "Could not load the configuration for bot {{agentId}}.",
+    idConflict: "An agent with this ID already exists.",
   },
   skillPackages: {
     modifiedNotLoaded:
@@ -10256,6 +10257,7 @@ mutableResources["pt-BR"].translation.controlPlane = {
   agent: {
     loadTitle: "Falha ao carregar {{agentId}}",
     loadDescription: "Não foi possível carregar a configuração do bot {{agentId}}.",
+    idConflict: "Já existe um agente com este ID.",
   },
   skillPackages: {
     modifiedNotLoaded:
@@ -10290,6 +10292,7 @@ mutableResources["es-ES"].translation.controlPlane = {
   agent: {
     loadTitle: "Error al cargar {{agentId}}",
     loadDescription: "No fue posible cargar la configuración del bot {{agentId}}.",
+    idConflict: "Ya existe un agente con este ID.",
   },
   skillPackages: {
     modifiedNotLoaded:
@@ -10324,6 +10327,7 @@ mutableResources["fr-FR"].translation.controlPlane = {
   agent: {
     loadTitle: "Échec du chargement de {{agentId}}",
     loadDescription: "Impossible de charger la configuration du bot {{agentId}}.",
+    idConflict: "Un agent avec cet identifiant existe déjà.",
   },
   skillPackages: {
     modifiedNotLoaded:
@@ -10358,6 +10362,7 @@ mutableResources["de-DE"].translation.controlPlane = {
   agent: {
     loadTitle: "{{agentId}} konnte nicht geladen werden",
     loadDescription: "Konfiguration für Bot {{agentId}} konnte nicht geladen werden.",
+    idConflict: "Ein Agent mit dieser ID existiert bereits.",
   },
   skillPackages: {
     modifiedNotLoaded:
@@ -13875,6 +13880,8 @@ mutableResources["en-US"].translation.runtime.overview.metrics = {
 
 mutableResources["en-US"].translation.schedules.page = {
   ...(mutableResources["en-US"].translation.schedules.page ?? {}),
+  noAgents: "No agents yet",
+  noAgentsDescription: "Create an agent to schedule routines for it.",
   unavailable: "Schedules unavailable",
   unavailableDescription: "Unable to load canonical schedules.",
   visibleAgents: "Visible agents",
@@ -14327,6 +14334,8 @@ mutableResources["pt-BR"].translation.runtime.overview.metrics = {
 
 mutableResources["pt-BR"].translation.schedules.page = {
   ...(mutableResources["pt-BR"].translation.schedules.page ?? {}),
+  noAgents: "Nenhum agente ainda",
+  noAgentsDescription: "Crie um agente para agendar rotinas para ele.",
   unavailable: "Agendamentos indisponíveis",
   unavailableDescription: "Não foi possível carregar os agendamentos canônicos.",
   visibleAgents: "Agentes visíveis",
@@ -14779,6 +14788,8 @@ mutableResources["es-ES"].translation.runtime.overview.metrics = {
 
 mutableResources["es-ES"].translation.schedules.page = {
   ...(mutableResources["es-ES"].translation.schedules.page ?? {}),
+  noAgents: "Aún no hay agentes",
+  noAgentsDescription: "Crea un agente para programar rutinas para él.",
   unavailable: "Programaciones no disponibles",
   unavailableDescription: "No se pudieron cargar las programaciones canónicas.",
   visibleAgents: "Agentes visibles",
@@ -15231,6 +15242,8 @@ mutableResources["fr-FR"].translation.runtime.overview.metrics = {
 
 mutableResources["fr-FR"].translation.schedules.page = {
   ...(mutableResources["fr-FR"].translation.schedules.page ?? {}),
+  noAgents: "Aucun agent pour l'instant",
+  noAgentsDescription: "Créez un agent pour lui planifier des routines.",
   unavailable: "Planifications indisponibles",
   unavailableDescription: "Impossible de charger les planifications canoniques.",
   visibleAgents: "Agents visibles",
@@ -15683,6 +15696,8 @@ mutableResources["de-DE"].translation.runtime.overview.metrics = {
 
 mutableResources["de-DE"].translation.schedules.page = {
   ...(mutableResources["de-DE"].translation.schedules.page ?? {}),
+  noAgents: "Noch keine Agenten",
+  noAgentsDescription: "Erstelle einen Agenten, um Routinen für ihn zu planen.",
   unavailable: "Zeitpläne nicht verfügbar",
   unavailableDescription: "Kanonische Zeitpläne konnten nicht geladen werden.",
   visibleAgents: "Sichtbare Agenten",
@@ -15794,6 +15809,7 @@ mutableResources["en-US"].translation.routines = {
       daily: "Daily",
       weekly: "Weekly",
       monthly: "Monthly",
+      interval: "Interval",
       custom: "Custom",
     },
     presetsLabel: "Recurrence preset",
@@ -15811,6 +15827,8 @@ mutableResources["en-US"].translation.routines = {
     },
     customCron: "Cron expression",
     customCronHint: "Each cell uses cron syntax: number, range, list, step, or * for any.",
+    interval: "Every",
+    intervalHint: "Seconds, or a number followed by m, h or d (for example 30m).",
     cron: {
       minute: "min",
       hour: "hour",
@@ -15844,6 +15862,8 @@ mutableResources["en-US"].translation.routines = {
     connectors: {
       description: "Integrations available to the agent during each run.",
       empty: "No connectors selected. Add one to expose its tools to this routine.",
+      unavailable: "Not available yet",
+      unavailableDescription: "Runs do not use connectors yet, so none can be added to a routine.",
       addAction: "Add connector",
       searchPlaceholder: "Search connectors",
       searchEmpty: "No connectors match your search.",
@@ -15917,6 +15937,7 @@ mutableResources["en-US"].translation.routines = {
       dateTimeRequired: "Pick a date and time for the one-shot run.",
       customCronRequired: "Provide a cron expression.",
       cronInvalid: "Cron expression has invalid values.",
+      intervalRequired: "Provide an interval.",
     },
   },
 };
@@ -15971,6 +15992,7 @@ mutableResources["pt-BR"].translation.routines = {
       daily: "Diária",
       weekly: "Semanal",
       monthly: "Mensal",
+      interval: "Intervalo",
       custom: "Personalizada",
     },
     presetsLabel: "Recorrência",
@@ -15988,6 +16010,8 @@ mutableResources["pt-BR"].translation.routines = {
     },
     customCron: "Expressão cron",
     customCronHint: "Cada célula aceita sintaxe cron: número, intervalo, lista, passo, ou * para qualquer.",
+    interval: "A cada",
+    intervalHint: "Segundos, ou um número seguido de m, h ou d (por exemplo 30m).",
     cron: {
       minute: "min",
       hour: "hora",
@@ -16021,6 +16045,8 @@ mutableResources["pt-BR"].translation.routines = {
     connectors: {
       description: "Integrações disponíveis para o agente durante cada execução.",
       empty: "Nenhum conector selecionado. Adicione um para expor suas ferramentas a esta rotina.",
+      unavailable: "Ainda não disponível",
+      unavailableDescription: "As execuções ainda não usam conectores, então não é possível adicioná-los a uma rotina.",
       addAction: "Adicionar conector",
       searchPlaceholder: "Buscar conectores",
       searchEmpty: "Nenhum conector corresponde à sua busca.",
@@ -16094,6 +16120,7 @@ mutableResources["pt-BR"].translation.routines = {
       dateTimeRequired: "Escolha uma data e hora para a execução única.",
       customCronRequired: "Forneça uma expressão cron.",
       cronInvalid: "A expressão cron tem valores inválidos.",
+      intervalRequired: "Informe um intervalo.",
     },
   },
 };
@@ -16148,6 +16175,7 @@ mutableResources["es-ES"].translation.routines = {
       daily: "Diaria",
       weekly: "Semanal",
       monthly: "Mensual",
+      interval: "Intervalo",
       custom: "Personalizada",
     },
     presetsLabel: "Recurrencia",
@@ -16165,6 +16193,8 @@ mutableResources["es-ES"].translation.routines = {
     },
     customCron: "Expresión cron",
     customCronHint: "Cada celda acepta sintaxis cron: número, rango, lista, paso o * para cualquiera.",
+    interval: "Cada",
+    intervalHint: "Segundos, o un número seguido de m, h o d (por ejemplo 30m).",
     cron: {
       minute: "min",
       hour: "hora",
@@ -16198,6 +16228,8 @@ mutableResources["es-ES"].translation.routines = {
     connectors: {
       description: "Integraciones disponibles para el agente durante cada ejecución.",
       empty: "Sin conectores seleccionados. Agrega uno para exponer sus herramientas a esta rutina.",
+      unavailable: "Aún no disponible",
+      unavailableDescription: "Las ejecuciones aún no usan conectores, así que no se pueden añadir a una rutina.",
       addAction: "Agregar conector",
       searchPlaceholder: "Buscar conectores",
       searchEmpty: "Ningún conector coincide con la búsqueda.",
@@ -16271,6 +16303,7 @@ mutableResources["es-ES"].translation.routines = {
       dateTimeRequired: "Elige fecha y hora para la ejecución única.",
       customCronRequired: "Proporciona una expresión cron.",
       cronInvalid: "La expresión cron tiene valores inválidos.",
+      intervalRequired: "Indica un intervalo.",
     },
   },
 };
@@ -16325,6 +16358,7 @@ mutableResources["fr-FR"].translation.routines = {
       daily: "Quotidien",
       weekly: "Hebdomadaire",
       monthly: "Mensuel",
+      interval: "Intervalle",
       custom: "Personnalisé",
     },
     presetsLabel: "Récurrence",
@@ -16342,6 +16376,8 @@ mutableResources["fr-FR"].translation.routines = {
     },
     customCron: "Expression cron",
     customCronHint: "Chaque cellule accepte la syntaxe cron : nombre, plage, liste, pas, ou * pour tous.",
+    interval: "Toutes les",
+    intervalHint: "Secondes, ou un nombre suivi de m, h ou d (par exemple 30m).",
     cron: {
       minute: "min",
       hour: "heure",
@@ -16375,6 +16411,8 @@ mutableResources["fr-FR"].translation.routines = {
     connectors: {
       description: "Intégrations disponibles pour l'agent à chaque exécution.",
       empty: "Aucun connecteur sélectionné. Ajoutez-en un pour exposer ses outils à cette routine.",
+      unavailable: "Pas encore disponible",
+      unavailableDescription: "Les exécutions n'utilisent pas encore les connecteurs : impossible d'en ajouter à une routine.",
       addAction: "Ajouter un connecteur",
       searchPlaceholder: "Rechercher des connecteurs",
       searchEmpty: "Aucun connecteur ne correspond à votre recherche.",
@@ -16448,6 +16486,7 @@ mutableResources["fr-FR"].translation.routines = {
       dateTimeRequired: "Choisissez une date et une heure.",
       customCronRequired: "Indiquez une expression cron.",
       cronInvalid: "L'expression cron contient des valeurs invalides.",
+      intervalRequired: "Indiquez un intervalle.",
     },
   },
 };
@@ -16502,6 +16541,7 @@ mutableResources["de-DE"].translation.routines = {
       daily: "Täglich",
       weekly: "Wöchentlich",
       monthly: "Monatlich",
+      interval: "Intervall",
       custom: "Benutzerdefiniert",
     },
     presetsLabel: "Wiederholung",
@@ -16519,6 +16559,8 @@ mutableResources["de-DE"].translation.routines = {
     },
     customCron: "Cron-Ausdruck",
     customCronHint: "Jede Zelle akzeptiert Cron-Syntax: Zahl, Bereich, Liste, Schritt oder * für alles.",
+    interval: "Alle",
+    intervalHint: "Sekunden oder eine Zahl gefolgt von m, h oder d (zum Beispiel 30m).",
     cron: {
       minute: "min",
       hour: "Std.",
@@ -16552,6 +16594,8 @@ mutableResources["de-DE"].translation.routines = {
     connectors: {
       description: "Integrationen, die dem Agenten bei jeder Ausführung zur Verfügung stehen.",
       empty: "Keine Konnektoren ausgewählt. Füge einen hinzu, damit seine Tools dieser Routine zur Verfügung stehen.",
+      unavailable: "Noch nicht verfügbar",
+      unavailableDescription: "Ausführungen verwenden noch keine Connectors, daher können einer Routine keine hinzugefügt werden.",
       addAction: "Konnektor hinzufügen",
       searchPlaceholder: "Konnektoren suchen",
       searchEmpty: "Kein Konnektor passt zur Suche.",
@@ -16625,6 +16669,7 @@ mutableResources["de-DE"].translation.routines = {
       dateTimeRequired: "Wähle Datum und Uhrzeit für die einmalige Ausführung.",
       customCronRequired: "Gib einen Cron-Ausdruck an.",
       cronInvalid: "Cron-Ausdruck enthält ungültige Werte.",
+      intervalRequired: "Gib ein Intervall an.",
     },
   },
 };

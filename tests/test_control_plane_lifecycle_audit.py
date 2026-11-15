@@ -105,7 +105,7 @@ def test_pause_agent_emits_audit_with_rolled_back_count() -> None:
     with (
         patch.object(manager_mod, "execute", recorder),
         patch("koda.control_plane.audit.execute", recorder),
-        patch.object(instance, "update_agent", lambda agent_id, fields: {"id": agent_id, **fields}),
+        patch.object(instance, "_update_agent_definition", lambda agent_id, fields: {"id": agent_id, **fields}),
         patch("koda.control_plane.lifecycle_events.notify_lifecycle_change"),
     ):
         result = instance.pause_agent("AGENT_GAMMA")
@@ -127,7 +127,7 @@ def test_activate_agent_emits_audit() -> None:
     with (
         patch.object(manager_mod, "execute", recorder),
         patch("koda.control_plane.audit.execute", recorder),
-        patch.object(instance, "update_agent", lambda agent_id, fields: {"id": agent_id, **fields}),
+        patch.object(instance, "_update_agent_definition", lambda agent_id, fields: {"id": agent_id, **fields}),
         patch("koda.control_plane.lifecycle_events.notify_lifecycle_change"),
     ):
         result = instance.activate_agent("AGENT_DELTA")

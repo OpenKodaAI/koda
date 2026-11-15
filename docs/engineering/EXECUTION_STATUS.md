@@ -48,6 +48,8 @@ Learned from waves 2A–7 and the ADR-002 rounds. Every workflow script follows 
 - Disk budget per worktree (2026-11-14 22:00): since M0-E2-T2 (56a87a6) every full pytest also builds `koda-bot-gateway` in release (~0.5 GB) besides the debug guard (~1-1.5 GB), so the hard-linked prebuilt binary no longer saves the build. Non-Rust waves share one `CARGO_TARGET_DIR` (`../koda-wt/.shared-target-w6`; the fixtures find binaries through cargo itself), which saves ~1.5 GB per worktree. Reviewers that copied the repository and built inside the copy pushed free disk to 1.6 GB on 2026-11-14 at 22:05. Rule 6 now applies to reviewer prompts too, and the orchestrator deletes a finished agent's scratch as soon as the agent-done monitor reports it.
 - Orphaned processes (2026-11-14 18:55): five session guards from killed pytest runs and a reviewer's `node server.mjs` were still running, some for 9 h with deleted binaries held open (D-254). After each wave the orchestrator checks for `koda-security-service` and `node server.mjs` processes whose parent is init and whose sockets and ports nobody uses, stops them, and removes merged worktrees and finished review scratch dirs. This freed 7 GB on 2026-11-14 (6.9 → 14 GB free).
 - Outbound web access is restricted: reference-product research relies on search results; anything not verifiable is marked as such.
+- Shared Rust build directory (2026-11-15 03:27): cargo records path-crate sources with relative paths and judges them fresh by file times alone, so with one `CARGO_TARGET_DIR` a checkout whose files are older than another checkout's latest build silently reuses that build. Batch 4's first gate run errored on all 8786 tests because it reused the M5-E3-T8 lane's `koda-security-core` (no `redact_value`). Rules: the shared directory (`../koda-wt/.shared-target-w6`) serves only lanes whose `rust/` matches main; a lane that changes `rust/` passes `target: ../koda-wt/.target-<id>` to the lane script; integration gates use `../koda-wt/.target-int` and touch the checkout's Rust sources first (`int-gates.sh`). After any `rust/` merge, rebuild the shared guard once from a main-based checkout with its Rust sources touched.
+- Container restarts stop every background task (workflows, monitors, gate runs) and Postgres. Recovery: `service postgresql start`; resume each workflow with its original `args` and `resumeFromRunId` (completed agents replay from cache; the interrupted agent reruns, so save and restore any half-finished edit in its worktree first); re-arm the monitors.
 
 ## Current phase
 
@@ -86,22 +88,22 @@ Learned from waves 2A–7 and the ADR-002 rounds. Every workflow script follows 
 
 ## Active tasks
 
-(2026-11-15 02:45 UTC. The progress tracker mirrors this list for the operator.)
+(2026-11-15 04:05 UTC. The progress tracker mirrors this list for the operator.)
 
-- Merged since the last record, all gates green: integration batch 2 (merge 6a1b874; pytest 8482, Postgres 299, web 1118): M2-E2-T4 + M2-E5-T1, M7-E1-T1/T2/T4 + M7-E2-T4, M6-E1-T2/T9/T10 + M6-E3-T5/T6. 47 plan tasks are done.
-- Integration batch 3 on `int/b3`, full gates running: M1-E4-T2/T5/T12, M1-E4-T3/T11, M4-E1-T1/T10/T14, M4-E1-T2/T3/T8, M1-E1-T5/T13.
+- Integration batch 4 on `int/b4` (full gates on a dedicated Rust build directory): M2-E3-T1/T2/T4, M0-E2-T4/T5, M3-E1-T3/T6/T7/T8, M1-E6-T2/T3/T5. Python 8596 passed; Postgres, web and Rust gates running.
+- Approved, waiting for integration batch 5:
+  - M3-E4-T6 labelled scanner corpus + D-259 docs (`task/M3-E4-T6`).
+  - M8-E1-T1/T2/T3 visible focus, language switcher, landmarks (`task/M8-E1-T1`).
+  - M10-E1-T2 one canonical agent guide (`task/M10-E1-T2`).
+  - M2-E2-T1/T5 transactions and the migrations drift gate (`task/M2-E2-T1`).
+  - M9-E1-T4 + M9-E2-T1/T2 sweeps, palette polling, parallel vitest (`task/M9-E1-T4`).
+  - M3-E6-T1/T2/T3 durable handoff completion (`task/M3-E6-T2`).
 - Lean lanes running:
-  - M3-E1 routines: Enter-key follow-up `wf_0f024746-863`.
-  - M2-E3-T1/T2/T4 (fix pass) `wf_4e92c024-9b5`.
-  - M0-E2-T4/T5 + D-265 `wf_71da1b06-bb8`.
-  - M5-E3-T8 one redactor (fix and confirm) `wf_472e2c70-deb`.
-  - M3-E6 durable handoff completion `wf_6d48935b-ff1`.
-  - M3-E4-T6 labelled scanner corpus + D-259 docs `wf_bb34e487-139`.
-  - M1-E6-T2/T3/T5 `wf_3e7f0f54-6c6`.
-  - M9-E1-T4 + M9-E2-T1/T2 `wf_0cf21be6-722`.
-  - M2-E2-T1/T5 `wf_9d4cfae9-a5e`.
-- Old-format run on its last round: WAVE-6 web M8-E1-T1..T3 `wf_8ffea544-16c`.
-- Awaiting the operator: ADR-002 OQ-1..OQ-12 and plan Q-25..Q-31; the web Docker image build; shellcheck for `scripts/install.sh`.
+  - M5-E3-T8 one redactor, review `wf_d7e5f9a4-d39`.
+  - SEC-D269 (D-269, D-273, D-270) `wf_7d480ed4-e99`.
+  - M6-E3-T2/T4 + M6-E1-T5/T8 `wf_108e871e-e91`.
+  - SEC-D283 (D-283, D-284, D-285), on top of `task/M2-E2-T1`, `wf_99809a63-cf7`.
+- Awaiting the operator: ADR-002 OQ-1..OQ-12 and plan Q-25..Q-31; the web Docker image build; shellcheck for `scripts/install.sh`; actionlint and a first GitHub Actions run of `migrations-gate.yml`.
 
 ## Pending findings for the plan (verified by the orchestrator)
 

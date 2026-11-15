@@ -643,3 +643,47 @@ Gates at 75fa194 (`int/b3`):
 - `pytest --cov=koda`: 8540 passed, 34 skipped, 171 xfailed; 68 % coverage.
 - `pytest -m postgres`: 303 passed, 2 skipped, 2 xfailed.
 - Web: `pnpm lint:web` 0 errors and 40 warnings; `pnpm test:web` 186 files and 1122 tests passed; `pnpm build:web` ok.
+
+## Integration batch 4 (2026-11-15, `int/b4`, rule 10 lean lanes)
+
+Lanes:
+- M2-E3-T1/T2/T4 (agent identity):
+  - Create and clone answer 409 on an id collision after normalisation and copy nothing. Without an id, the server generates the id and the health port; the dashboard sends neither and shows the conflict.
+  - One schema-checked list of per-agent tables (`koda/control_plane/agent_tables.py`). A Postgres test classifies all 97 `agent_id` tables, including three created at runtime. Delete coverage is unchanged (13 of 25) until M2-E3-T3.
+  - PATCH `status` goes through pause and activate; any other status change answers 400.
+- M0-E2-T4/T5 and D-265 (test isolation):
+  - The autouse approval fixture is the opt-in `execution_approved`. Strict-xfail tests show `shell_execute`, `git_status` and a supervised write fail without an approval context (D-011, fixed by M3-E3-T1).
+  - Each test session has its own `STATE_ROOT_DIR`; runs no longer write the real `~/.koda-state`.
+  - Strict pytest markers, 9 unused markers dropped, dead test packages removed.
+- M3-E1-T3/T6/T7/T8 (routines, with the D-268 and Enter-key follow-ups): archived routines hidden, names saved, action feedback follows the result, scheduler-side cron validation and a preview endpoint in the routine's zone, the connectors picker marked "Not available yet". A stub-backed Chromium suite (`apps/web/tests/e2e-stub`) covers Next and Enter before the Refine step.
+- M1-E6-T2/T3/T5 (secrets and TLS):
+  - `GRPC_TLS_ENABLED=true` stops startup with guidance; the sidecars refuse `GRPC_TLS_SERVER_CERT`/`KEY`; tonic is built without `tls`, which also drops rustls-pemfile from `rust/Cargo.lock`.
+  - Secrets store no preview, and no read returns one.
+  - M1-E6-T3 is done by removal: batch 3 already removed `get_signing_key` and its only use, and runtime tokens never used the master key.
+
+At integration:
+- Conflicts: batch 3 had removed the legacy importer and the signing key that two lanes edited. Kept the removals and dropped the lane code and tests that depended on them (the import race test, the HKDF key). `pyproject.toml` keeps the `slow` marker, which batch 3 applies.
+- The first gate run was invalid: every test errored at session setup because the shared Rust build directory handed this tree another lane's `koda-security-core` build. The gates ran again on a dedicated directory (see EXECUTION_STATUS "Shared Rust build directory").
+- A container restart stopped every background task during the run; the lanes were resumed from their journals.
+- Recorded: D-274 to D-277, D-279, Q-31, CHANGELOG entries for routines, FEATURE_MATRIX notes for batches 3 and 4, R-07, and SUPPLY_CHAIN_TRIAGE (rustls-pemfile resolved).
+
+Tests opted into `execution_approved` (M0-E2-T4 Done-when), 74 items in 8 files plus 3 regression controls:
+- `tests/test_services/test_shell_tools.py` (16): the `TestBackgroundProcessManagerKernelPath` and `TestBackgroundTimeoutsThroughRuntimeKernelClient` kernel-path tests.
+- `tests/test_services/test_cli_runner.py` (13): allowed commands, env passthrough, external CLI and npx runs, normal execution, timeout, stripped ambient secrets.
+- `tests/security/test_guardrail_adversarial_suite.py` (19): destructive commands against the canary (6), `shell_bg` denies what `shell_execute` denies (9), and four background-shell kernel tests.
+- `tests/test_services/test_shell_runner.py` (8): `TestRunShellCommand`.
+- `tests/integration/test_runtime_kernel_shell_live.py` (7, module-level).
+- `tests/test_services/test_security.py` (6): `TestCliRunnerUsesExec` (2), `TestInformationDisclosure` (1), `TestShellRunnerNewlineDefense` (3).
+- `tests/test_services/test_tool_dispatcher.py` (4): the supervised pass-through tests for `http_post` and three browser tools.
+- `tests/test_services/test_git_tools.py` (1): `TestGitToolsAgainstRealGit::test_normal_calls_succeed`.
+- Controls: `tests/test_services/test_approval_context_regression.py::test_policy_allowed_call_runs_inside_approval_context[git_status|shell_execute|supervised_write]`.
+
+Gates at 8a26acc (`int/b4`):
+- `ruff check .`: all checks passed.
+- `ruff format --check .`: 752 files already formatted.
+- `mypy koda/ --ignore-missing-imports`: no issues in 349 source files.
+- `pytest --cov=koda`: 8596 passed, 34 skipped, 177 xfailed; 68 % coverage.
+- `pytest -m postgres`: 316 passed, 2 skipped, 2 xfailed.
+- Web: `pnpm lint:web` 0 errors and 40 warnings; `pnpm test:web` 189 files and 1158 tests passed; `pnpm build:web` ok.
+- Rust: `cargo fmt --all --check` ok; `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo test --workspace` 22 suites, 102 passed, 0 failed, 3 ignored (on the dedicated `../koda-wt/.target-int`).
+- Doc and plan checks after the records: 81 passed; plan lint consistent (354 tasks).

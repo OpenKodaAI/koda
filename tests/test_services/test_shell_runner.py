@@ -36,6 +36,7 @@ def _runtime_kernel(result: dict[str, object] | None = None):
     return kernel
 
 
+@pytest.mark.usefixtures("execution_approved")
 class TestRunShellCommand:
     @pytest.mark.asyncio
     async def test_successful_command(self, monkeypatch):

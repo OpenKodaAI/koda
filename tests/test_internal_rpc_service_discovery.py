@@ -67,10 +67,7 @@ def test_create_channel_applies_round_robin_options_for_pool_target() -> None:
     """When the resolver returns an ``ipv4:`` pool target the channel
     must be opened with the round-robin LB policy."""
     fake_channel = MagicMock()
-    with (
-        patch("koda.config.GRPC_TLS_ENABLED", False),
-        patch("grpc.aio.insecure_channel", return_value=fake_channel) as spy,
-    ):
+    with patch("grpc.aio.insecure_channel", return_value=fake_channel) as spy:
         common.create_grpc_channel("ipv4:127.0.0.1:50063,127.0.0.2:50063", async_channel=True)
 
     args, kwargs = spy.call_args
@@ -85,10 +82,7 @@ def test_create_channel_omits_pool_options_for_single_target() -> None:
     blob, so a misconfigured static target cannot regress through
     extra channel-options parsing."""
     fake_channel = MagicMock()
-    with (
-        patch("koda.config.GRPC_TLS_ENABLED", False),
-        patch("grpc.aio.insecure_channel", return_value=fake_channel) as spy,
-    ):
+    with patch("grpc.aio.insecure_channel", return_value=fake_channel) as spy:
         common.create_grpc_channel("memory:50063", async_channel=True)
 
     _, kwargs = spy.call_args

@@ -159,6 +159,10 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   password recovery takes at least 300 ms from when its body is read, with the same
   work whether the account exists, is locked or the secret is wrong. (M1-E1-T5,
   M1-E1-T13, D-135, D-136)
+- Secrets no longer keep a masked preview (their first and last two characters). New
+  and updated secrets store none. `GET /api/control-plane/system-settings` and the draft
+  and published snapshots in `GET /api/control-plane/agents/{agent_id}` return `preview`
+  as `""`, also for values stored before. (M1-E6-T5, TD-077)
 
 
 ### Added
@@ -228,10 +232,34 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   user with the same id no longer share snapshots. Snapshots saved before this release
   under the old layout are not listed. `snapshot_restore` is described as loading a
   snapshot for inspection. The feature stays off by default (`SNAPSHOT_ENABLED`). (M6-E3-T6)
+- Creating or cloning an agent with an id that is already taken answers 409 with
+  `{"error": "agent id MY_AGENT already exists"}`. Ids are compared after
+  normalisation, so `my-agent` collides with `My Agent`. Before, create answered 201
+  with the existing agent, and clone copied the source's sections, documents and
+  assets into it. Without an `id`, the server now generates one from `display_name`
+  (`NOVO_AGENTE`, then `NOVO_AGENTE_2`) and allocates the health port; the dashboard
+  no longer picks either. (M2-E3-T1, D-055)
+- `PATCH /api/control-plane/agents/{agent_id}` changes `status` the way the pause and
+  activate endpoints do: a pause rolls running and retrying queue items back to
+  queued, and both wake the supervisor and write the `control_plane.agent_paused` or
+  `control_plane.agent_activated` audit row. A change to any other status, such as
+  `archived`, answers 400 and changes nothing. Before, PATCH wrote the status alone,
+  so a paused agent could keep queue items in `running` after its worker was
+  stopped. (M2-E3-T4, D-150)
+- The routine connectors picker is disabled and reads "Not available yet": nothing used
+  its list. (M3-E1-T8)
 
 
 ### Removed
 
+- `GRPC_TLS_ENABLED`, with `GRPC_TLS_CA_CERT`, `GRPC_TLS_CLIENT_CERT` and
+  `GRPC_TLS_CLIENT_KEY`. The switch moved every internal gRPC channel to TLS, but only
+  the security and memory sidecars served TLS, so it broke the runtime-kernel, artifact,
+  retrieval, policy and bot-gateway connections. Koda now refuses to start with
+  `GRPC_TLS_ENABLED=true` and says to remove it, and the security and memory sidecars
+  refuse `GRPC_TLS_SERVER_CERT` and `GRPC_TLS_SERVER_KEY` the same way. Sidecar traffic
+  is not encrypted: keep the sidecar ports on loopback, a Unix socket or a private
+  network (`docs/operations/hardening.md`). (M1-E6-T2, D-139)
 - Onboarding readiness no longer reports the fixed sandbox, MCP, memory and docs
   checks, which never changed. Every remaining check comes from live state. (M1-E1-T3)
 - The runtime image no longer contains npm, npx or corepack. (AG-02)
@@ -329,6 +357,15 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 - `scripts/install.sh` stops with a clear message on Node older than 20, installs Node
   from NodeSource when it is missing, and picks the Docker apt repository from
   `/etc/os-release` (Debian, Ubuntu and derivatives). (M7-E2-T4)
+- Routines: deleted routines no longer reappear in the list, and renames are saved.
+  (M3-E1-T3, D-079, D-063)
+- Routines: Run, Pause, Resume and Delete report failures and no longer open the editor;
+  with no agents the page shows an empty state; a version conflict answers 409. In the
+  editor, Next and Enter before the Refine step never save or create the routine.
+  (M3-E1-T6, D-121, D-122, D-123, D-211, D-268)
+- Routines: cron step, range and list syntax is accepted and validated by the scheduler;
+  next-run previews and one-shot times use the routine's timezone; interval routines stay
+  intervals. (M3-E1-T7, D-080, D-081)
 
 
 ## [1.0.18] - 2026-05-20

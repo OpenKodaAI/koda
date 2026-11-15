@@ -983,10 +983,12 @@ def list_dashboard_schedules(
     *,
     limit: int = 50,
     offset: int = 0,
+    include_archived: bool = False,
 ) -> list[dict[str, Any]]:
     resolved = _resolve_agent_ids(agent_ids)
     if not resolved:
         return []
+    archived_filter = "" if include_archived else "AND status <> 'archived'"
     rows = _fetch_all(
         f"""
         SELECT id, user_id, chat_id, agent_id, job_type, trigger_type, schedule_expr, timezone,
@@ -995,7 +997,7 @@ def list_dashboard_schedules(
                verification_policy_json, notification_policy_json, dry_run_required,
                created_at, updated_at
           FROM scheduled_jobs
-         WHERE agent_id IN ({_placeholders(len(resolved))})
+         WHERE agent_id IN ({_placeholders(len(resolved))}) {archived_filter}
       ORDER BY COALESCE(next_run_at, updated_at) ASC, id DESC
          LIMIT ? OFFSET ?
         """,
