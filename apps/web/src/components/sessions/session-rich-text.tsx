@@ -115,23 +115,25 @@ function createMarkdownComponents(options: MentionRenderOptions | null): Compone
     li: ({ children }) => (
       <li>{renderMentionChildren(children, options, "li")}</li>
     ),
+    // A message sits under the page's h1, so its headings render one level
+    // down (M8-E1-T3); the class keeps the size of the markdown level.
     h1: ({ children }) => (
-      <h1>{renderMentionChildren(children, options, "h1")}</h1>
+      <h2 className="session-richtext__h1">{renderMentionChildren(children, options, "h1")}</h2>
     ),
     h2: ({ children }) => (
-      <h2>{renderMentionChildren(children, options, "h2")}</h2>
+      <h3 className="session-richtext__h2">{renderMentionChildren(children, options, "h2")}</h3>
     ),
     h3: ({ children }) => (
-      <h3>{renderMentionChildren(children, options, "h3")}</h3>
+      <h4 className="session-richtext__h3">{renderMentionChildren(children, options, "h3")}</h4>
     ),
     h4: ({ children }) => (
-      <h4>{renderMentionChildren(children, options, "h4")}</h4>
+      <h5 className="session-richtext__h4">{renderMentionChildren(children, options, "h4")}</h5>
     ),
     h5: ({ children }) => (
-      <h5>{renderMentionChildren(children, options, "h5")}</h5>
+      <h6 className="session-richtext__h5">{renderMentionChildren(children, options, "h5")}</h6>
     ),
     h6: ({ children }) => (
-      <h6>{renderMentionChildren(children, options, "h6")}</h6>
+      <h6 className="session-richtext__h6">{renderMentionChildren(children, options, "h6")}</h6>
     ),
     th: ({ children, align }) => (
       <th align={align}>{renderMentionChildren(children, options, "th")}</th>

@@ -3372,6 +3372,26 @@ button[aria-label="Open Next Dev Tools"] {
   font-size: 0.92rem;
 }
 
+/* SessionRichText renders markdown headings one level down (M8-E1-T3); these
+   keep the size of the markdown level. */
+.session-richtext .session-richtext__h1 {
+  font-size: 1.18rem;
+}
+
+.session-richtext .session-richtext__h2 {
+  font-size: 1.08rem;
+}
+
+.session-richtext .session-richtext__h3 {
+  font-size: 1rem;
+}
+
+.session-richtext .session-richtext__h4,
+.session-richtext .session-richtext__h5,
+.session-richtext .session-richtext__h6 {
+  font-size: 0.92rem;
+}
+
 .session-richtext ul,
 .session-richtext ol {
   padding-left: 1.15rem;
@@ -3486,12 +3506,7 @@ button[aria-label="Open Next Dev Tools"] {
   color: var(--text-secondary);
 }
 
-.session-richtext--user h1,
-.session-richtext--user h2,
-.session-richtext--user h3,
-.session-richtext--user h4,
-.session-richtext--user h5,
-.session-richtext--user h6 {
+.session-richtext.session-richtext--user :is(h1, h2, h3, h4, h5, h6) {
   font-size: 0.96rem;
 }
 

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { AuthRouteLoading } from "@/components/layout/route-loading";
 import { SkipToContentLink } from "@/components/layout/skip-to-content-link";
 import { I18nProvider } from "@/components/providers/i18n-provider";
+import { SessionRichText } from "@/components/sessions/session-rich-text";
 import { SetupFrame } from "@/components/setup/setup-frame";
 
 // M8-E1-T3 (D-189, D-190, F-WEB-14): one <main> landmark per page, one <h1>
@@ -40,8 +41,6 @@ const H1_ALLOWED = [
   "components/setup/step-recovery-codes.tsx",
   // /sessions hides the topbar: a visually hidden route title.
   "components/features/sessions/sessions-page-client.tsx",
-  // Markdown headings inside a chat message.
-  "components/sessions/session-rich-text.tsx",
   // Not mounted on any route (no importers).
   "components/control-plane/shared/entity-header.tsx",
   "components/control-plane/system/integrations/integration-marketplace.tsx",
@@ -72,6 +71,21 @@ describe("landmarks, headings and the skip link (M8-E1-T3)", () => {
       .map((path) => relative(SRC, path))
       .sort();
     expect(withH1).toEqual(H1_ALLOWED);
+  });
+
+  it("renders chat markdown headings one level below the page <h1>", () => {
+    const { container } = render(
+      <SessionRichText
+        content={"# Release notes\n\n## Fixes\n\n###### Footnote\n\nEverything shipped correctly."}
+      />,
+    );
+    expect(container.querySelectorAll("h1")).toHaveLength(0);
+    expect(screen.getByRole("heading", { level: 2, name: "Release notes" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: "Fixes" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 6, name: "Footnote" })).toBeInTheDocument();
+    // Each keeps the size of the markdown level it came from.
+    expect(screen.getByRole("heading", { name: "Release notes" })).toHaveClass("session-richtext__h1");
+    expect(screen.getByRole("heading", { name: "Fixes" })).toHaveClass("session-richtext__h2");
   });
 
   it("keeps the unmounted <h1> components unmounted", () => {
