@@ -41,13 +41,16 @@ def _materialize_due_runs(now: datetime | None = None) -> int:
     jobs = _jobs()
     now = now or jobs._utcnow()
     cutoff = now - timedelta(hours=jobs.SCHEDULER_CATCHUP_WINDOW_HOURS)
+    # Only this agent's jobs: every agent process shares the scheduler tables, and a job runs
+    # through its own agent's bot and runtime, under its own agent's policy snapshot.
     rows = _store().fetch_all(
         """
         SELECT * FROM scheduled_jobs
         WHERE status = ? AND next_run_at IS NOT NULL AND next_run_at <= ?
+          AND agent_id IS NOT DISTINCT FROM ?
         ORDER BY next_run_at ASC
         """,
-        (jobs.JOB_STATUS_ACTIVE, jobs._iso(now)),
+        (jobs.JOB_STATUS_ACTIVE, jobs._iso(now), jobs.AGENT_ID),
     )
     materialized = 0
     for row in rows:
@@ -208,6 +211,7 @@ def _claim_due_runs(limit: int | None = None) -> list[dict[str, Any]]:
         FROM scheduled_job_runs r
         JOIN scheduled_jobs j ON j.id = r.scheduled_job_id
         WHERE j.status IN (?, ?, ?, ?, ?)
+          AND j.agent_id IS NOT DISTINCT FROM ?
           AND r.status IN (?, ?)
           AND COALESCE(r.next_attempt_at, r.scheduled_for) <= ?
           AND (r.lease_expires_at IS NULL OR r.lease_expires_at < ?)
@@ -220,6 +224,7 @@ def _claim_due_runs(limit: int | None = None) -> list[dict[str, Any]]:
             jobs.JOB_STATUS_ACTIVE,
             jobs.JOB_STATUS_PAUSED,
             jobs.JOB_STATUS_FAILED_OPEN,
+            jobs.AGENT_ID,
             jobs.RUN_STATUS_QUEUED,
             jobs.RUN_STATUS_RETRYING,
             jobs._iso(now),

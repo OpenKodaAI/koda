@@ -15,6 +15,9 @@ Pinned guarantees:
     without restarting the dispatcher. A live run keeps its lease instead: one
     whose runtime task is still active, or whose dispatch is still running in
     this process, is never recovered or dispatched a second time.
+  * Each agent's process materializes, claims and dispatches only its own
+    agent's jobs, through its own bot and under its own policy, so a job's
+    policy snapshot never flips between agents.
   * ``POST /api/runtime/schedules`` queues a validation run for the new job
     instead of attempting an activation that the scheduler always rejects, and
     the queued validation activates the job when it passes (or leaves it
@@ -24,8 +27,9 @@ Pinned guarantees:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -369,6 +373,125 @@ async def test_dispatch_still_running_in_this_process_is_not_recovered_and_runs_
         call for call in application.bot.send_message.await_args_list if "Reminder:" in str(call.kwargs.get("text"))
     ]
     assert len(reminders) == 1
+
+
+_POLICY_A = {"approval_mode": "agent-a-policy"}
+_POLICY_B = {"approval_mode": "agent-b-policy"}
+
+
+@contextlib.contextmanager
+def _as_agent(agent_id: str | None, execution_policy: dict[str, Any]) -> Iterator[None]:
+    """Run scheduler code as one agent's process: its agent id and its execution policy."""
+    from koda.services import scheduled_jobs
+
+    with (
+        patch.object(scheduled_jobs, "AGENT_ID", agent_id),
+        patch.object(scheduled_jobs, "AGENT_EXECUTION_POLICY", execution_policy),
+    ):
+        yield
+
+
+def _reminders_sent(application: Any) -> list[str]:
+    return [
+        str(call.kwargs.get("text"))
+        for call in application.bot.send_message.await_args_list
+        if "Reminder:" in str(call.kwargs.get("text"))
+    ]
+
+
+async def test_an_agent_cycle_never_claims_another_agents_queued_run(scheduler_db: str) -> None:
+    from koda.services import scheduled_jobs
+
+    application_a, application_b = _fake_application(), _fake_application()
+    with _as_agent("AGENT_B", _POLICY_B):
+        job_b = scheduled_jobs.create_reminder_job(
+            user_id=111, chat_id=333, trigger_type="interval", schedule_expr="3600", text="Drink water"
+        )
+
+    # Agent A's cycle sees agent B's queued validation run and leaves it to agent B.
+    with _as_agent("AGENT_A", _POLICY_A):
+        cycle = await _run_dispatch_cycle(application_a)
+    assert cycle["claimed"] == 0
+    [validation_run] = _runs(job_b, scheduled_jobs.RUN_TRIGGER_MANUAL_TEST)
+    assert validation_run["status"] == scheduled_jobs.RUN_STATUS_QUEUED
+    application_a.bot.send_message.assert_not_called()
+
+    with _as_agent("AGENT_B", _POLICY_B):
+        cycle = await _run_dispatch_cycle(application_b)
+    assert cycle["claimed"] == 1
+    job = scheduled_jobs._get_job(job_b)
+    assert job is not None and job["status"] == scheduled_jobs.JOB_STATUS_ACTIVE
+
+
+async def test_a_process_without_agent_id_runs_the_jobs_created_without_one(scheduler_db: str) -> None:
+    # A standalone install runs without AGENT_ID: its jobs carry no agent, and they still run there.
+    from koda.services import scheduled_jobs
+
+    with _as_agent(None, _POLICY_A):
+        job_id = scheduled_jobs.create_reminder_job(
+            user_id=111, chat_id=222, trigger_type="interval", schedule_expr="3600", text="Stretch break"
+        )
+    job = scheduled_jobs._get_job(job_id)
+    assert job is not None and job["agent_id"] is None
+
+    with _as_agent("AGENT_A", _POLICY_A):
+        assert (await _run_dispatch_cycle(_fake_application()))["claimed"] == 0
+    with _as_agent(None, _POLICY_A):
+        assert (await _run_dispatch_cycle(_fake_application()))["claimed"] == 1
+    job = scheduled_jobs._get_job(job_id)
+    assert job is not None and job["status"] == scheduled_jobs.JOB_STATUS_ACTIVE
+
+
+async def test_each_agent_materializes_and_dispatches_only_its_own_jobs_under_its_own_policy(
+    scheduler_db: str,
+) -> None:
+    from koda.services import scheduled_jobs
+
+    application_a, application_b = _fake_application(), _fake_application()
+    with _as_agent("AGENT_A", _POLICY_A):
+        job_a = await _active_reminder_job(application_a)
+    with _as_agent("AGENT_B", _POLICY_B):
+        job_b = scheduled_jobs.create_reminder_job(
+            user_id=111, chat_id=333, trigger_type="interval", schedule_expr="3600", text="Drink water"
+        )
+        await _run_dispatch_cycle(application_b)
+    validated_a, validated_b = scheduled_jobs._get_job(job_a), scheduled_jobs._get_job(job_b)
+    assert validated_a is not None and validated_b is not None
+    assert validated_b["status"] == scheduled_jobs.JOB_STATUS_ACTIVE
+    hash_a, hash_b = validated_a["policy_snapshot_hash"], validated_b["policy_snapshot_hash"]
+    assert hash_a != hash_b
+    due_at = scheduled_jobs._iso(scheduled_jobs._utcnow() - timedelta(seconds=5))
+    scheduled_jobs._touch_job(job_a, next_run_at=due_at)
+    scheduled_jobs._touch_job(job_b, next_run_at=due_at)
+
+    # Agent A's cycle runs agent A's job only, through agent A's bot.
+    with _as_agent("AGENT_A", _POLICY_A):
+        cycle = await _run_dispatch_cycle(application_a)
+    assert cycle["materialized"] == 1
+    assert cycle["claimed"] == 1
+    assert _runs(job_b, scheduled_jobs.RUN_TRIGGER_NORMAL) == []
+    untouched_b = scheduled_jobs._get_job(job_b)
+    assert untouched_b is not None
+    assert untouched_b["next_run_at"] == due_at
+    assert untouched_b["policy_snapshot_hash"] == hash_b
+    assert _reminders_sent(application_a) == ["⏰ Reminder: Stretch break"]
+
+    # Agent B's cycle runs agent B's job under agent B's policy; agent A's snapshot stays put.
+    with _as_agent("AGENT_B", _POLICY_B):
+        cycle = await _run_dispatch_cycle(application_b)
+    assert cycle["materialized"] == 1
+    [run_b] = _runs(job_b, scheduled_jobs.RUN_TRIGGER_NORMAL)
+    assert run_b["status"] == scheduled_jobs.RUN_STATUS_SUCCEEDED, run_b.get("error_message")
+    assert run_b["metadata"]["policy_snapshot_hash"] == hash_b
+    assert run_b["metadata"]["policy_snapshot"]["execution_policy"] == _POLICY_B
+    [run_a] = _runs(job_a, scheduled_jobs.RUN_TRIGGER_NORMAL)
+    assert run_a["metadata"]["policy_snapshot"]["execution_policy"] == _POLICY_A
+    job_a_after = scheduled_jobs._get_job(job_a)
+    assert job_a_after is not None and job_a_after["policy_snapshot_hash"] == hash_a
+    assert _events(job_a, "job.policy_snapshot_refreshed") == []
+    assert _events(job_b, "job.policy_snapshot_refreshed") == []
+    assert _reminders_sent(application_b) == ["⏰ Reminder: Drink water"]
+    assert _reminders_sent(application_a) == ["⏰ Reminder: Stretch break"]
 
 
 class _AllowRuntimeAccess:
