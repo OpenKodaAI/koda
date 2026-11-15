@@ -26,8 +26,9 @@ from koda.knowledge.v2.common import coerce_storage_mode, get_shared_postgres_ba
 class KnowledgeStorageV2:
     """High-level storage facade used by knowledge and runtime services.
 
-    In PRIMARY mode reads and writes go to the shared Postgres backend; in
-    OFF mode writes are skipped and reads fall back to the repository.
+    In PRIMARY mode reads and writes go to the shared Postgres backend. In
+    OFF mode writes are skipped, artifact-evidence reads return no rows, and
+    trace reads fall back to the repository.
     """
 
     def __init__(
@@ -174,14 +175,11 @@ class KnowledgeStorageV2:
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         self._require_primary_backend()
-        if self.primary_read_enabled():
-            return await self._postgres.list_artifact_derivative_rows(
-                task_id=task_id,
-                project_key=project_key,
-                workspace_fingerprint=workspace_fingerprint,
-                limit=limit,
-            )
-        return self._repository.list_artifact_evidence(
+        if not self.primary_read_enabled():
+            # Only the OFF-mode artifact ingest wrote artifact_evidence_nodes,
+            # and M4-E1-T6 removed it.
+            return []
+        return await self._postgres.list_artifact_derivative_rows(
             task_id=task_id,
             project_key=project_key,
             workspace_fingerprint=workspace_fingerprint,

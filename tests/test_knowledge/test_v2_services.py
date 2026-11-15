@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import sys
-from collections.abc import Coroutine
+from collections.abc import Coroutine, Iterator
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -388,7 +388,6 @@ def test_knowledge_manager_propagates_retrieval_engine_hint_into_answer_plan():
             experiment_plan=experiment_plan,
             trace_role=TraceRole.PRIMARY,
             max_results=1,
-            persist_trace=False,
         )
 
     assert resolution.answer_plan["retrieval_engine"] == "rust_grpc"
@@ -488,7 +487,6 @@ def test_knowledge_manager_preserves_authoritative_remote_bundle_without_python_
             experiment_plan=experiment_plan,
             trace_role=TraceRole.PRIMARY,
             max_results=2,
-            persist_trace=False,
         )
 
     assert [hit.entry.id for hit in resolution.hits] == ["workspace-1", "policy-1"]
@@ -1459,10 +1457,211 @@ async def test_resolve_completes_when_the_deferred_trace_write_fails():
     assert outcomes == [write_error]
 
 
+@pytest.mark.asyncio
+async def test_evaluate_response_completes_when_the_deferred_answer_trace_write_fails():
+    """Characterises the turn's other fire-and-forget write (TD-086, M4-E1-T6).
+
+    ``persist_answer_trace_deferred`` hands the answer-trace write to
+    ``KnowledgeStorageV2._schedule``. When that detached write fails, the
+    response evaluation still returns, the trace is reported as pending with
+    no error and no id, and the failure exists only on the detached task.
+    M7-E1-T7 changes this to a visible error.
+    """
+    from koda.services.knowledge_orchestration_service import KnowledgeOrchestrationService
+
+    write_error = RuntimeError("knowledge primary write failed")
+    failing_write = AsyncMock(side_effect=write_error)
+    storage = KnowledgeStorageV2(KnowledgeRepository("AGENT_A"), "AGENT_A", storage_mode="primary")
+    storage._postgres = SimpleNamespace(  # type: ignore[assignment]
+        enabled=True,
+        bootstrapped=True,
+        persist_answer_trace=failing_write,
+    )
+    service = KnowledgeOrchestrationService(storage)
+    resolution = KnowledgeResolution(context="", answer_plan={"uncertainty_level": "high"})
+    tasks_before = asyncio.all_tasks()
+
+    grounded, _judgement, _evaluation, _gate = service.evaluate_response(
+        response="read only response",
+        resolution=resolution,
+        had_write=False,
+        task_id=103,
+    )
+
+    detached = list(asyncio.all_tasks() - tasks_before)
+    outcomes = await asyncio.gather(*detached, return_exceptions=True)
+
+    assert grounded.metadata["answer_trace_pending"] is True
+    assert "answer_trace_error" not in grounded.metadata
+    assert "answer_trace_id" not in grounded.metadata
+    failing_write.assert_awaited_once()
+    assert failing_write.await_args.kwargs["task_id"] == 103
+    assert outcomes == [write_error]
+
+
+class _GovernanceWrites:
+    """Records the SQL the knowledge governance store would run."""
+
+    def __init__(self) -> None:
+        self.statements: list[str] = []
+
+    def run(self, call: tuple[str, str]) -> list[Any] | None:
+        kind, sql = call
+        self.statements.append(sql)
+        return [] if kind == "fetch" else None
+
+    def source_registrations(self) -> list[str]:
+        return [sql for sql in self.statements if "INSERT INTO knowledge_source_registry" in sql]
+
+
+@pytest.fixture
+def off_storage_mode(monkeypatch: pytest.MonkeyPatch) -> Iterator[_GovernanceWrites]:
+    """Select KNOWLEDGE_V2_STORAGE_MODE=off, as knowledge_policy.storage_mode can.
+
+    Governance-store SQL is recorded instead of run, and the repository's
+    graph and artifact-evidence writers are replaced with mocks.
+    """
+    import koda.state.knowledge_governance_store as governance_store
+
+    clear_shared_postgres_backends()
+    monkeypatch.setattr("koda.knowledge.storage_v2.KNOWLEDGE_V2_STORAGE_MODE", "off")
+    monkeypatch.setattr("koda.knowledge.repository.KNOWLEDGE_V2_STORAGE_MODE", "off")
+    monkeypatch.setattr("koda.knowledge.manager.KNOWLEDGE_ENABLED", True)
+    monkeypatch.setattr("koda.knowledge.manager.KNOWLEDGE_MULTIMODAL_GRAPH_ENABLED", True)
+    writes = _GovernanceWrites()
+    monkeypatch.setattr(governance_store, "_primary_enabled", lambda _agent_id=None: True)
+    monkeypatch.setattr(governance_store, "primary_execute", lambda sql, *_a, **_k: ("execute", sql))
+    monkeypatch.setattr(governance_store, "primary_fetch_all", lambda sql, *_a, **_k: ("fetch", sql))
+    monkeypatch.setattr(governance_store, "run_coro_sync", writes.run)
+    monkeypatch.setattr(KnowledgeRepository, "batch_upsert_graph", MagicMock(name="batch_upsert_graph"))
+    monkeypatch.setattr(
+        KnowledgeRepository,
+        "batch_upsert_artifact_evidence",
+        MagicMock(name="batch_upsert_artifact_evidence"),
+    )
+    yield writes
+    clear_shared_postgres_backends()
+
+
+class _NoStartRetrieval:
+    engine_name = "rust_grpc"
+
+    def query(self, **_kwargs: object) -> RetrievalBundle:
+        raise AssertionError("OFF mode never reaches the retrieval engine")
+
+
+@pytest.mark.asyncio
+async def test_off_mode_initialize_registers_no_knowledge_pack_source(
+    off_storage_mode: _GovernanceWrites, monkeypatch: pytest.MonkeyPatch
+):
+    """M4-E1-T6 removed the OFF-mode pack loader: KNOWLEDGE_PACK_TOML no longer
+    registers a ``pack:<id>`` source or writes graph rows (needs operator sign-off)."""
+    monkeypatch.setenv(
+        "KNOWLEDGE_PACK_TOML",
+        'pack_id = "ops"\nowner = "sre"\n'
+        '[[entries]]\nid = "deploy"\ntitle = "Deploy"\ncontent = "Deploy needs approval."\n',
+    )
+    manager = KnowledgeManager("AGENT_A", retrieval_service=_NoStartRetrieval())  # type: ignore[arg-type]
+
+    await manager.initialize()
+
+    assert manager.initialized is True
+    assert not manager._storage_v2.primary_read_enabled()
+    assert off_storage_mode.source_registrations() == []
+    cast(MagicMock, KnowledgeRepository.batch_upsert_graph).assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_off_mode_resolve_raises_without_registering_workspace_sources(
+    off_storage_mode: _GovernanceWrites, tmp_path: Any
+):
+    """In OFF mode resolve raises as before, but no longer registers
+    ``workspace:<path>`` sources first (needs operator sign-off)."""
+    (tmp_path / "README.md").write_text("# Deploy\nDeploys need approval.\n", encoding="utf-8")
+    manager = KnowledgeManager("AGENT_A", retrieval_service=_NoStartRetrieval())  # type: ignore[arg-type]
+    await manager.initialize()
+
+    with pytest.raises(RuntimeError, match="knowledge_retrieval_engine_not_authoritative"):
+        await manager.resolve(
+            KnowledgeQueryContext(
+                query="deploy approval",
+                agent_id="AGENT_A",
+                task_id=7,
+                task_kind="deploy",
+                workspace_dir=str(tmp_path),
+            )
+        )
+
+    assert off_storage_mode.source_registrations() == []
+
+
+@pytest.mark.asyncio
+async def test_off_mode_artifact_ingest_writes_no_evidence_rows(off_storage_mode: _GovernanceWrites):
+    """In OFF mode an artifact dossier no longer produces artifact_evidence_nodes
+    or graph rows (needs operator sign-off)."""
+    artifact = SimpleNamespace(
+        ref=SimpleNamespace(kind="pdf", label="invoice.pdf", path="/tmp/invoice.pdf", url="", artifact_id="art-1"),
+        summary="Invoice total 42",
+        evidence_chunks=[SimpleNamespace(citation="invoice.pdf p1", excerpt="Invoice total 42", score_hint=0.8)],
+        metadata={},
+        status=SimpleNamespace(value="ready"),
+        critical_for_action=False,
+    )
+    dossier = SimpleNamespace(subject_id="msg-1", subject_label="PDF upload", summary="one pdf", artifacts=[artifact])
+    manager = KnowledgeManager("AGENT_A", retrieval_service=_NoStartRetrieval())  # type: ignore[arg-type]
+    await manager.initialize()
+
+    nodes = await manager.ingest_artifact_dossiers(
+        KnowledgeQueryContext(query="read the invoice", agent_id="AGENT_A", task_id=8),
+        [dossier],
+    )
+
+    assert nodes == []
+    cast(MagicMock, KnowledgeRepository.batch_upsert_artifact_evidence).assert_not_called()
+    cast(MagicMock, KnowledgeRepository.batch_upsert_graph).assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_off_mode_artifact_evidence_read_returns_no_rows(off_storage_mode: _GovernanceWrites):
+    """Nothing writes artifact_evidence_nodes any more, so the OFF-mode read
+    returns no rows instead of querying that table (needs operator sign-off)."""
+    repository = KnowledgeRepository("AGENT_A")
+    storage = KnowledgeStorageV2(repository, "AGENT_A")
+    stale_row = {"evidence_key": "old", "label": "invoice.pdf p1"}
+
+    with patch.object(repository, "list_artifact_evidence", return_value=[stale_row]) as legacy_read:
+        rows = await storage.list_artifact_evidence_rows_async(
+            task_id=None,
+            project_key="",
+            workspace_fingerprint="",
+        )
+
+    assert rows == []
+    legacy_read.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_initialize_logs_only_the_backend_state():
+    """``knowledge_initialized`` carries no constant fields."""
+    manager = KnowledgeManager("AGENT_A", retrieval_service=_NoStartRetrieval())  # type: ignore[arg-type]
+
+    with (
+        patch("koda.knowledge.manager.KNOWLEDGE_ENABLED", True),
+        patch.object(manager._storage_v2, "primary_read_enabled", return_value=True),
+        patch.object(manager._storage_v2, "external_read_enabled", return_value=True),
+        patch.object(manager._storage_v2, "start_primary_backend", AsyncMock(return_value=True)),
+        patch("koda.knowledge.manager.log") as log,
+    ):
+        await manager.initialize()
+
+    log.info.assert_called_once_with("knowledge_initialized", primary_backend=True)
+
+
 def test_dead_knowledge_paths_are_removed():
     """M4-E1-T6: the local/OFF retrieval path, the store wrappers and the
     uncalled evaluation helpers are gone."""
     import importlib.util
+    import inspect
 
     from koda.knowledge import evaluation, manager, storage_v2
     from koda.knowledge.v2 import common
@@ -1481,6 +1680,10 @@ def test_dead_knowledge_paths_are_removed():
         "_build_artifact_graph_relations",
     ):
         assert not hasattr(manager.KnowledgeManager, name), name
+    # Arguments and imports that only fed the removed paths.
+    assert "persist_trace" not in inspect.signature(manager.KnowledgeManager._resolve_with_strategy).parameters
+    assert "supporting_evidence" not in inspect.signature(manager.KnowledgeManager._render_context).parameters
+    assert not hasattr(manager, "ArtifactEvidenceMatch")
     for name in ("persist_entries", "persist_artifact_derivatives", "persist_retrieval_bundle"):
         assert not hasattr(storage_v2.KnowledgeStorageV2, name), name
     for name in (

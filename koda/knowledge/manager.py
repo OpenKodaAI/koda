@@ -24,10 +24,8 @@ from koda.knowledge.retrieval_v2 import KnowledgeRetrievalService, RetrievalEngi
 from koda.knowledge.storage_v2 import KnowledgeStorageV2
 from koda.knowledge.telemetry import knowledge_span
 from koda.knowledge.types import (
-    ArtifactEvidenceMatch,
     ArtifactEvidenceNode,
     AuthoritativeEvidence,
-    CanonicalRelation,
     CitationRequirement,
     KnowledgeConflict,
     KnowledgeGuardrail,
@@ -106,13 +104,7 @@ class KnowledgeManager:
             except Exception:
                 log.exception("knowledge_primary_backend_start_failed")
         self._initialized = True
-        log.info(
-            "knowledge_initialized",
-            entry_count=0,
-            primary_backend=self._storage_v2.external_read_enabled(),
-            local_materialization=False,
-            knowledge_pack_loading=False,
-        )
+        log.info("knowledge_initialized", primary_backend=self._storage_v2.external_read_enabled())
 
     async def search(
         self,
@@ -169,7 +161,6 @@ class KnowledgeManager:
                 experiment_plan=experiment_plan,
                 trace_role=TraceRole.PRIMARY,
                 max_results=max_results,
-                persist_trace=experiment_plan.persist_primary_trace,
             )
             self._finalize_trace_persistence(
                 primary_resolution=primary_resolution,
@@ -192,7 +183,11 @@ class KnowledgeManager:
         query_context: KnowledgeQueryContext,
         dossiers: list[Any],
     ) -> list[ArtifactEvidenceNode]:
-        """Return no evidence nodes: this manager does not ingest artifact dossiers."""
+        """Return no evidence nodes: this manager does not ingest artifact dossiers.
+
+        No mode writes artifact evidence here. Before M4-E1-T6 the OFF storage
+        mode wrote ``artifact_evidence_nodes`` and graph rows from the dossiers.
+        """
         if not KNOWLEDGE_MULTIMODAL_GRAPH_ENABLED or not dossiers or query_context.task_id is None:
             return []
         if self._storage_v2.primary_read_enabled():
@@ -211,7 +206,6 @@ class KnowledgeManager:
         experiment_plan: KnowledgeExperimentPlan,
         trace_role: TraceRole,
         max_results: int | None,
-        persist_trace: bool,
     ) -> KnowledgeResolution:
         if not KNOWLEDGE_V2_ENABLED or not self._storage_v2.primary_read_enabled():
             raise RuntimeError("knowledge_retrieval_engine_not_authoritative")
@@ -235,7 +229,6 @@ class KnowledgeManager:
             ),
             max_results=max_results or KNOWLEDGE_MAX_RESULTS,
         )
-        trace_hits = retrieval_bundle.trace_hits
         route = retrieval_bundle.route
         graph_hops = retrieval_bundle.graph_hops
         grounding_score = retrieval_bundle.grounding_score
@@ -257,12 +250,6 @@ class KnowledgeManager:
         deduped = list(retrieval_bundle.selected_hits)
         conflicts: list[KnowledgeConflict] = []
         trace_hits = list(retrieval_bundle.trace_hits)
-        authoritative_sources: list[AuthoritativeEvidence] = []
-        supporting_sources: list[SupportingEvidence] = []
-        linked_entities = []
-        graph_relations: list[CanonicalRelation] = []
-        query_intent = ""
-        answer_plan: dict[str, Any] = {}
         authoritative_sources = [
             item
             for item in retrieval_bundle.authoritative_evidence
@@ -277,10 +264,8 @@ class KnowledgeManager:
             retrieval_bundle=retrieval_bundle,
             retrieval_engine=retrieval_bundle.effective_engine or getattr(self._retrieval_v2, "engine_name", ""),
         )
-        render_supporting_evidence = None
         context, context_blocks = self._render_context(
             deduped,
-            supporting_evidence=render_supporting_evidence,
             answer_plan=answer_plan,
             authoritative_sources=authoritative_sources,
             supporting_sources=supporting_sources,
@@ -445,7 +430,6 @@ class KnowledgeManager:
         self,
         hits: list[KnowledgeHit],
         *,
-        supporting_evidence: list[ArtifactEvidenceMatch] | None = None,
         answer_plan: dict[str, Any] | None = None,
         authoritative_sources: list[AuthoritativeEvidence] | None = None,
         supporting_sources: list[SupportingEvidence] | None = None,
@@ -489,17 +473,7 @@ class KnowledgeManager:
         if not sections:
             return "", []
 
-        if supporting_evidence:
-            evidence_lines = ["### Supporting Multimodal Evidence (Auxiliary, Not Operational Authority)"]
-            for match in supporting_evidence[:4]:
-                evidence_lines.append(
-                    "- "
-                    f"[{match.modality.value} | confidence {match.confidence:.2f} | similarity {match.similarity:.2f}] "
-                    f"{match.label}: {match.excerpt}"
-                )
-            if len(evidence_lines) > 1:
-                sections.append("\n".join(evidence_lines))
-        elif supporting_sources:
+        if supporting_sources:
             v2_supporting_sources = list(supporting_sources)
             evidence_lines = ["### Supporting Evidence (Auxiliary, Not Operational Authority)"]
             for supporting_item in v2_supporting_sources[:4]:
