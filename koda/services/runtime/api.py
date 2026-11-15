@@ -396,7 +396,8 @@ async def _runtime_schedule_update(request: web.Request) -> web.Response:
         if isinstance(payload.get("evidence"), dict)
         else None,
     )
-    status = 200 if result.get("ok") else 400
+    # A version conflict answers 409 so the dashboard can reload the routine (D-122).
+    status = 200 if result.get("ok") else 409 if result.get("conflict") else 400
     if result.get("ok"):
         detail = _schedule_detail_payload(int(request.match_info["job_id"]))
         result = {**result, **(detail or {})}

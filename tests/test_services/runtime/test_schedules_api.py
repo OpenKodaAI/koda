@@ -12,6 +12,7 @@ from aiohttp.test_utils import AioHTTPTestCase
 from koda.services.runtime.api import (
     _IDEMPOTENCY_CACHE,
     _runtime_schedule_create,
+    _runtime_schedule_update,
 )
 
 
@@ -279,3 +280,48 @@ def test_idempotency_cache_does_not_grow_unbounded() -> None:
         _idempotency_remember(user_id=1, key=f"k{i}", job_id=i)
     assert len(_IDEMPOTENCY_CACHE) == 10
     _IDEMPOTENCY_CACHE.clear()
+
+
+class RuntimeScheduleUpdateTests(AioHTTPTestCase):
+    """D-122: a version conflict answers 409 so the routines page can reload the routine."""
+
+    async def get_application(self) -> web.Application:
+        app = web.Application()
+        app.router.add_patch("/api/runtime/schedules/{job_id:\\d+}", _runtime_schedule_update)
+        return app
+
+    async def setUpAsync(self) -> None:
+        await super().setUpAsync()
+        self._patches = [
+            patch("koda.services.runtime.api.RuntimeAccessService", _StubRuntimeAccessService),
+            patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "test-token"),
+        ]
+        for entry in self._patches:
+            entry.start()
+
+    async def tearDownAsync(self) -> None:
+        for entry in self._patches:
+            entry.stop()
+        await super().tearDownAsync()
+
+    async def _patch_job(self, stored_job: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        with patch("koda.services.scheduled_jobs._get_job", return_value=stored_job):
+            async with self.client.patch(
+                "/api/runtime/schedules/7",
+                data=json.dumps(
+                    {"user_id": 1, "expected_config_version": 1, "patch": {"name": "Renamed"}},
+                ),
+                headers={"X-Runtime-Token": "any", "Content-Type": "application/json"},
+            ) as response:
+                return response.status, await response.json()
+
+    async def test_version_conflict_returns_409_with_the_backend_message(self) -> None:
+        status, payload = await self._patch_job({"id": 7, "status": "active", "config_version": 2})
+        assert status == 409
+        assert payload["ok"] is False
+        assert payload["message"].startswith("Job was updated by another actor.")
+
+    async def test_other_refusals_stay_400(self) -> None:
+        status, payload = await self._patch_job({"id": 7, "status": "archived", "config_version": 1})
+        assert status == 400
+        assert payload["message"] == "Archived jobs cannot be edited."

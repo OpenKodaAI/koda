@@ -13855,6 +13855,8 @@ mutableResources["en-US"].translation.runtime.overview.metrics = {
 
 mutableResources["en-US"].translation.schedules.page = {
   ...(mutableResources["en-US"].translation.schedules.page ?? {}),
+  noAgents: "No agents yet",
+  noAgentsDescription: "Create an agent to schedule routines for it.",
   unavailable: "Schedules unavailable",
   unavailableDescription: "Unable to load canonical schedules.",
   visibleAgents: "Visible agents",
@@ -14307,6 +14309,8 @@ mutableResources["pt-BR"].translation.runtime.overview.metrics = {
 
 mutableResources["pt-BR"].translation.schedules.page = {
   ...(mutableResources["pt-BR"].translation.schedules.page ?? {}),
+  noAgents: "Nenhum agente ainda",
+  noAgentsDescription: "Crie um agente para agendar rotinas para ele.",
   unavailable: "Agendamentos indisponíveis",
   unavailableDescription: "Não foi possível carregar os agendamentos canônicos.",
   visibleAgents: "Agentes visíveis",
@@ -14759,6 +14763,8 @@ mutableResources["es-ES"].translation.runtime.overview.metrics = {
 
 mutableResources["es-ES"].translation.schedules.page = {
   ...(mutableResources["es-ES"].translation.schedules.page ?? {}),
+  noAgents: "Aún no hay agentes",
+  noAgentsDescription: "Crea un agente para programar rutinas para él.",
   unavailable: "Programaciones no disponibles",
   unavailableDescription: "No se pudieron cargar las programaciones canónicas.",
   visibleAgents: "Agentes visibles",
@@ -15211,6 +15217,8 @@ mutableResources["fr-FR"].translation.runtime.overview.metrics = {
 
 mutableResources["fr-FR"].translation.schedules.page = {
   ...(mutableResources["fr-FR"].translation.schedules.page ?? {}),
+  noAgents: "Aucun agent pour l'instant",
+  noAgentsDescription: "Créez un agent pour lui planifier des routines.",
   unavailable: "Planifications indisponibles",
   unavailableDescription: "Impossible de charger les planifications canoniques.",
   visibleAgents: "Agents visibles",
@@ -15663,6 +15671,8 @@ mutableResources["de-DE"].translation.runtime.overview.metrics = {
 
 mutableResources["de-DE"].translation.schedules.page = {
   ...(mutableResources["de-DE"].translation.schedules.page ?? {}),
+  noAgents: "Noch keine Agenten",
+  noAgentsDescription: "Erstelle einen Agenten, um Routinen für ihn zu planen.",
   unavailable: "Zeitpläne nicht verfügbar",
   unavailableDescription: "Kanonische Zeitpläne konnten nicht geladen werden.",
   visibleAgents: "Sichtbare Agenten",

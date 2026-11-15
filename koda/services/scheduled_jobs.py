@@ -1444,6 +1444,7 @@ def update_job(
                 f"Expected version {expected_config_version}, found {current_config_version}."
             ),
             "config_version": current_config_version,
+            "conflict": True,
         }
 
     before = _job_audit_snapshot(job)

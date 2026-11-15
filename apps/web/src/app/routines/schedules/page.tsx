@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { Clock3, DatabaseZap, History, Plus } from "lucide-react";
+import { Bot, Clock3, DatabaseZap, History, Plus } from "lucide-react";
 import {
   CronTable,
   type ScheduleTableActionKey,
@@ -351,7 +351,9 @@ export default function SchedulesPage() {
     error: schedulesQuery.error,
   });
   const stableSchedulesPayload = useContentStable(stableSchedulesQuery.data ?? undefined);
-  const loading = stableSchedulesQuery.initialLoading;
+  // With no agents the query stays disabled (and pending), so it must not gate the page (D-211).
+  const noAgents = agents.length === 0;
+  const loading = !noAgents && stableSchedulesQuery.initialLoading;
   const unavailable =
     stableSchedulesPayload?.pages.some((page) => page.unavailable) ?? Boolean(schedulesQuery.error);
   const scheduleItems = useMemo(
@@ -466,12 +468,14 @@ export default function SchedulesPage() {
     }
   }
 
+  // Returns whether the backend accepted the action. Row actions never open the editor (D-123):
+  // their result shows in the status line, or as an error toast.
   async function runAction(
     job: CronJob,
     action: "pause" | "resume" | "run" | "validate" | "delete",
     actionKey?: ScheduleTableActionKey,
-  ) {
-    if (!job.bot_id) return;
+  ): Promise<boolean> {
+    if (!job.bot_id) return false;
     setBusyJobId(job.id);
     setTableActionState(job.id, actionKey, "pending");
     setStatusMessage(null);
@@ -493,21 +497,14 @@ export default function SchedulesPage() {
       }
       setStatusMessage((payload as { message?: string }).message || "Schedule updated.");
       setTableActionState(job.id, actionKey, "success");
-      if (action === "delete") {
-        setSelectedJob(null);
-        setSelectedDetail(null);
-        setEditDraft(null);
-      } else if ("job" in payload && payload.job) {
-        setSelectedDetail(payload as ScheduleDetail);
-        setSelectedJob((payload as ScheduleDetail).job);
-        setEditDraft(buildDraft(payload as ScheduleDetail));
-      } else {
-        await loadDetail(job);
-      }
       void schedulesQuery.refetch();
+      return true;
     } catch (error) {
-      setEditorError(error instanceof Error ? error.message : "Unable to operate on schedule");
+      const message = error instanceof Error ? error.message : "Unable to operate on schedule";
+      setEditorError(message);
+      showToast(message, "error");
       setTableActionState(job.id, actionKey, "error");
+      return false;
     } finally {
       setBusyJobId(null);
     }
@@ -542,9 +539,10 @@ export default function SchedulesPage() {
             } & Partial<ScheduleDetail>)
           | { error?: string; field?: string };
         if (!response.ok) {
-          const fallback = t("routines.editor.messages.createFailed");
-          const errMessage =
-            "error" in responseBody ? responseBody.error || fallback : fallback;
+          const errMessage = scheduleErrorMessage(
+            responseBody,
+            t("routines.editor.messages.createFailed"),
+          );
           showToast(errMessage, "error");
           throw new Error(errMessage);
         }
@@ -604,9 +602,8 @@ export default function SchedulesPage() {
           setEditorError(t("routines.editor.errors.conflict"));
           return;
         }
-        const fallback = t("schedules.inspector.messages.updateFailed");
         throw new Error(
-          "error" in responseBody ? responseBody.error || fallback : fallback,
+          scheduleErrorMessage(responseBody, t("schedules.inspector.messages.updateFailed")),
         );
       }
       showToast(t("routines.editor.messages.updated"), "success");
@@ -734,7 +731,15 @@ export default function SchedulesPage() {
             />
           </PageMetricStrip>
 
-          {unavailable ? (
+          {noAgents ? (
+            <div className="py-6">
+              <PageEmptyState
+                icon={Bot}
+                title={t("schedules.page.noAgents")}
+                description={t("schedules.page.noAgentsDescription")}
+              />
+            </div>
+          ) : unavailable ? (
             <div className="py-6">
               <PageEmptyState
                 icon={DatabaseZap}
@@ -844,7 +849,8 @@ export default function SchedulesPage() {
           const job = pendingDeleteJob;
           setPendingDeleteJob(null);
           if (!job) return;
-          await runAction(job, "delete");
+          // On failure runAction toasts the backend's reason and the editor stays open with it.
+          if (!(await runAction(job, "delete"))) return;
           showToast(t("routines.editor.messages.deleted"), "success");
           closeEditor();
         }}
