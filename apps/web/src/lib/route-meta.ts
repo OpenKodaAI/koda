@@ -6,6 +6,24 @@ export interface RouteMeta {
   summary: string;
 }
 
+/**
+ * How the app shell frames a route.
+ * - `page`: the default scrolling page in the 1720px column.
+ * - `pane`: from `lg` up the route fills the viewport below the topbar and
+ *   scrolls inside its own panes.
+ * - `fullBleed`: the route owns the whole viewport height. From `lg` up the
+ *   topbar is hidden; below `lg` it stays, since it holds the menu trigger.
+ */
+export interface RouteShell {
+  layout: "page" | "pane" | "fullBleed";
+  /** Pane routes that span the full width instead of the 1720px column. */
+  fullWidth?: boolean;
+  /** Pane routes whose route stage clips its own overflow. */
+  clipStage?: boolean;
+}
+
+const DEFAULT_ROUTE_SHELL: RouteShell = { layout: "page" };
+
 const ROUTE_META: Array<{
   match: (pathname: string) => boolean;
   key:
@@ -19,17 +37,22 @@ const ROUTE_META: Array<{
     | "costs"
     | "schedules"
     | "dlq";
+  shell?: RouteShell;
 }> = [
   {
     match: (pathname) => pathname.startsWith("/control-plane/system"),
     key: "system",
+    shell: { layout: "pane", clipStage: true },
   },
   {
-    match: (pathname) =>
-      pathname === "/control-plane" ||
-      pathname.startsWith("/control-plane/agents/") ||
-      pathname.startsWith("/control-plane/agents/"),
+    match: (pathname) => pathname === "/control-plane",
     key: "agents",
+    shell: { layout: "pane" },
+  },
+  {
+    match: (pathname) => pathname.startsWith("/control-plane/agents/"),
+    key: "agents",
+    shell: { layout: "pane", fullWidth: true },
   },
   {
     match: (pathname) => pathname.startsWith("/runtime"),
@@ -56,6 +79,7 @@ const ROUTE_META: Array<{
   {
     match: (pathname) => pathname.startsWith("/sessions"),
     key: "sessions",
+    shell: { layout: "fullBleed" },
   },
   {
     match: (pathname) => pathname.startsWith("/costs"),
@@ -67,12 +91,20 @@ const ROUTE_META: Array<{
   },
 ];
 
+function findRoute(pathname: string) {
+  return ROUTE_META.find((entry) => entry.match(pathname));
+}
+
 export function getRouteMeta(pathname: string, t: AppTranslator): RouteMeta {
-  const routeKey = ROUTE_META.find((entry) => entry.match(pathname))?.key ?? "fallback";
+  const routeKey = findRoute(pathname)?.key ?? "fallback";
 
   return {
     eyebrow: t(`routeMeta.${routeKey}.eyebrow`),
     title: t(`routeMeta.${routeKey}.title`),
     summary: t(`routeMeta.${routeKey}.summary`),
   };
+}
+
+export function getRouteShell(pathname: string): RouteShell {
+  return findRoute(pathname)?.shell ?? DEFAULT_ROUTE_SHELL;
 }
