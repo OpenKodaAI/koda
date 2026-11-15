@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import os
 import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -79,7 +80,7 @@ class PluginRegistry:
             self._handlers.pop(tool.id, None)
             self._tool_to_plugin.pop(tool.id, None)
         # Remove plugin module from sys.modules
-        prefix = f"_koda_plugin_{plugin_name}"
+        prefix = _plugin_module_prefix(plugin_name)
         to_remove = [k for k in sys.modules if k.startswith(prefix)]
         for k in to_remove:
             del sys.modules[k]
@@ -161,25 +162,34 @@ class PluginRegistry:
 
         The handler file must resolve inside *plugin_dir*; an absolute path, a
         traversal or a symlink out of the plugin is rejected before anything is
-        imported. ``sys.path`` is left untouched.
+        imported. The file is then opened once, and its source is read from that
+        handle only while the checked path still names the opened file, so a file
+        swapped in after the check is not loaded (D-270). The module gets a flat
+        name, with no parent package, so a relative import in it fails instead of
+        resolving against another package. ``sys.path`` is left untouched.
         """
-        from koda.skills._package import _safe_child_path
+        from koda.skills._package import _safe_child_path, _SourceOnlyLoader
 
         parts = handler_path.rsplit(".", 1)
         if len(parts) != 2:
             return None
         module_path, func_name = parts
-        file_path = _safe_child_path(plugin_dir, f"{module_path.replace('.', '/')}.py")
+        relative_path = f"{module_path.replace('.', '/')}.py"
+        file_path = _safe_child_path(plugin_dir, relative_path)
         if file_path is None:
             log.warning("plugin_handler_path_rejected", handler=handler_path, plugin_dir=str(plugin_dir))
             return None
         # Create a unique module name to avoid conflicts
-        plugin_name = plugin_dir.name
-        module_name = f"_koda_plugin_{plugin_name}.{module_path}"
+        module_name = _plugin_module_prefix(plugin_dir.name) + module_path.replace(".", "__")
         try:
+            source = _read_checked_source(plugin_dir, relative_path, file_path)
+            if source is None:
+                log.warning("plugin_handler_path_changed", handler=handler_path, plugin_dir=str(plugin_dir))
+                return None
             if module_name in sys.modules:
                 del sys.modules[module_name]
-            spec = importlib.util.spec_from_file_location(module_name, file_path)
+            loader = _SourceOnlyLoader(module_name, str(file_path), source=source)
+            spec = importlib.util.spec_from_file_location(module_name, file_path, loader=loader)
             if spec is None or spec.loader is None:
                 return None
             module = importlib.util.module_from_spec(spec)
@@ -192,3 +202,29 @@ class PluginRegistry:
         except Exception as e:
             log.warning("plugin_handler_load_failed", handler=handler_path, error=str(e))
             return None
+
+
+def _plugin_module_prefix(plugin_name: str) -> str:
+    """The start of a plugin's handler module names: flat, so there is no parent package."""
+    return f"_koda_plugin_{plugin_name}__".replace(".", "__")
+
+
+def _read_checked_source(plugin_dir: Path, relative_path: str, file_path: Path) -> bytes | None:
+    """Read *file_path* through one handle, or return None when the path no longer names that file.
+
+    The final component is opened without following a symlink. After the open, the
+    path must still resolve to *file_path* inside *plugin_dir* and name the file the
+    handle holds, so a file or directory swapped between the check and the open is
+    refused rather than loaded.
+    """
+    from koda.skills._package import _safe_child_path
+
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    with os.fdopen(os.open(file_path, flags), "rb") as handle:
+        opened = os.fstat(handle.fileno())
+        if _safe_child_path(plugin_dir, relative_path) != file_path:
+            return None
+        current = os.stat(file_path)
+        if (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino):
+            return None
+        return handle.read()

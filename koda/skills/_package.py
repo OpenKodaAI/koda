@@ -601,11 +601,20 @@ def verify_skill_package_integrity(lock: dict[str, Any]) -> dict[str, Any]:
 
 
 class _SourceOnlyLoader(importlib.machinery.SourceFileLoader):
-    """Compile a module from its source file, never reading or writing a bytecode cache."""
+    """Compile a module from its source, never reading or writing a bytecode cache.
+
+    The source is *source* when given (bytes already read through a checked handle),
+    otherwise the file at *path*.
+    """
+
+    def __init__(self, fullname: str, path: str, source: bytes | None = None) -> None:
+        super().__init__(fullname, path)
+        self._source = source
 
     def get_code(self, fullname: str) -> types.CodeType:
         path = self.get_filename(fullname)
-        return self.source_to_code(self.get_data(path), path)
+        source = self._source if self._source is not None else self.get_data(path)
+        return self.source_to_code(source, path)
 
 
 class _PackageSourceOnlyFinder(importlib.abc.MetaPathFinder):

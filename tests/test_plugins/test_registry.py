@@ -162,7 +162,89 @@ class TestHandlerPathContainment:
         assert reg.reload("demo") is None
 
         assert sys.path == before
-        module = sys.modules["_koda_plugin_demo.handlers"]
+        module = sys.modules["_koda_plugin_demo__handlers"]
         assert str(plugin_dir) not in module.SYS_PATH_AT_IMPORT
         assert reg.get_handler("demo_run") is not None
         reg.unregister("demo")
+
+
+class TestHandlerLoadIsAtomic:
+    """D-270: the file checked is the file loaded, under a flat module name."""
+
+    @pytest.mark.parametrize("swap", ["file", "parent_directory"])
+    def test_a_handler_swapped_for_an_outside_file_after_the_check_does_not_run(
+        self, tmp_path: Path, swap: str
+    ) -> None:
+        import os
+
+        from koda.skills import _package
+
+        outside = _write_evil(tmp_path)
+        (outside / "handlers.py").write_text(_EVIL_SOURCE.replace("def fn", "def run"), encoding="utf-8")
+        plugin_dir = _write_plugin(tmp_path, "sub.handlers.run")
+        (plugin_dir / "sub").mkdir()
+        (plugin_dir / "sub" / "handlers.py").write_text(_HANDLER_SOURCE, encoding="utf-8")
+        real_check = _package._safe_child_path
+        swapped: list[bool] = []
+
+        def check_then_swap(root: Path, value: str) -> Path | None:
+            result = real_check(root, value)
+            if not swapped:
+                swapped.append(True)
+                if swap == "file":
+                    (plugin_dir / "sub" / "link").symlink_to(outside / "handlers.py")
+                    os.replace(plugin_dir / "sub" / "link", plugin_dir / "sub" / "handlers.py")
+                else:
+                    (plugin_dir / "sub").rename(plugin_dir / "sub_checked")
+                    (plugin_dir / "sub").symlink_to(outside, target_is_directory=True)
+            return result
+
+        with patch.object(_package, "_safe_child_path", check_then_swap):
+            handler_fn = PluginRegistry()._load_handler(plugin_dir, "sub.handlers.run")
+
+        assert swapped
+        assert handler_fn is None
+        assert not (outside / "pwned").exists()
+
+    def test_the_handler_module_has_a_flat_name_so_a_relative_import_cannot_reach_another_package(
+        self, tmp_path: Path
+    ) -> None:
+        import types
+
+        outside = _write_evil(tmp_path)
+        (outside / "helper.py").write_text(_EVIL_SOURCE, encoding="utf-8")
+        plugin_dir = _write_plugin(tmp_path, "handlers.run")
+        (plugin_dir / "handlers.py").write_text(
+            "from . import helper\n\n\nasync def run(params, ctx):\n    return 'ok'\n", encoding="utf-8"
+        )
+        # A package that happens to sit at the dotted name the handler used to get.
+        lookalike = types.ModuleType("_koda_plugin_demo")
+        lookalike.__path__ = [str(outside)]
+        with patch.dict(sys.modules, {"_koda_plugin_demo": lookalike}):
+            handler_fn = PluginRegistry()._load_handler(plugin_dir, "handlers.run")
+            sys.modules.pop("_koda_plugin_demo.helper", None)
+
+        assert handler_fn is None
+        assert not (outside / "pwned").exists()
+
+    def test_handler_modules_are_registered_under_flat_names_and_removed_on_unregister(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from koda.plugins.manifest import parse_manifest
+
+        for name in [name for name in sys.modules if name.startswith("_koda_plugin_demo")]:
+            monkeypatch.delitem(sys.modules, name)
+        plugin_dir = _write_plugin(tmp_path, "sub.handlers.run")
+        (plugin_dir / "sub").mkdir()
+        (plugin_dir / "sub" / "handlers.py").write_text(_HANDLER_SOURCE, encoding="utf-8")
+        manifest = parse_manifest(plugin_dir / "plugin.yaml")
+        assert not isinstance(manifest, str)
+        reg = PluginRegistry()
+
+        assert reg.register(manifest) is None
+        names = [name for name in sys.modules if name.startswith("_koda_plugin_demo")]
+        assert names == ["_koda_plugin_demo__sub__handlers"]
+        assert sys.modules[names[0]].__package__ == ""
+
+        reg.unregister("demo")
+        assert not [name for name in sys.modules if name.startswith("_koda_plugin_demo")]
