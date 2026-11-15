@@ -2484,8 +2484,9 @@ class KnowledgeV2PostgresBackend:
                 (
                     # Token registry — one row per agent. The bot-gateway
                     # service polls Telegram on behalf of every registered
-                    # bot. ``bot_token`` is treated as a secret; gateway
-                    # logs redact it via the koda-security-core helpers.
+                    # bot. ``bot_token`` is treated as a secret: the gateway
+                    # never logs it, and Python paths mask it through
+                    # koda.security.redaction (its key matches ``token``).
                     f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_bot_gateway_tokens" (
                             agent_id TEXT PRIMARY KEY,
                             bot_token TEXT NOT NULL,

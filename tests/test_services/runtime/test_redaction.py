@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from koda.services.runtime.redaction import redact_json_dumps, redact_value
+from koda.security.redaction import redact_json_dumps, redact_value
 
 
 def test_redact_value_masks_nested_secret_keys_and_runtime_tokens():

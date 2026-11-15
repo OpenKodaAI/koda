@@ -1,6 +1,18 @@
-"""Tests for audit redaction logic in koda.services.audit."""
+"""Audit redaction: the shared redactor's string and payload rules, and the audit details."""
 
-from koda.services.audit import _prepare_details, _redact_string, _sanitize_payload
+from typing import Any
+
+from koda.security.redaction import redact_text, redact_value_with_paths
+from koda.services.audit import _prepare_details
+
+
+def _redact_string(text: str) -> tuple[str, bool]:
+    result = redact_text(text)
+    return result, result != text
+
+
+def _sanitize_payload(data: Any) -> tuple[Any, list[str]]:
+    return redact_value_with_paths(data)
 
 
 class TestRedactStringBearerTokens:
@@ -227,3 +239,43 @@ class TestPrepareDetails:
         result = _prepare_details(details)
         assert "mytoken123" not in str(result)
         assert "redactions" in result
+
+
+class TestExecutionTraceIdentifiers:
+    """Identifiers in a persisted execution trace survive audit redaction (M5-E3-T8 review)."""
+
+    @staticmethod
+    def _trace() -> dict[str, Any]:
+        artifact_dir = "/srv/koda/artifacts/1b4e28ba-2fa1-11d2-883f-0016d3cca427"
+        return {
+            "request": {
+                "session_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+                "work_dir": "/srv/projects/my_very_long_project_directory",
+            },
+            "tools": [{"name": "mcp__github__pull_request_review_write", "success": True}],
+            "raw_artifacts": {
+                "artifact_dossiers": [
+                    {
+                        "subject_label": "Reports",
+                        "artifacts": [
+                            {"ref": {"path": f"{artifact_dir}/quarterly_financial_report_2026.pdf", "kind": "pdf"}},
+                            {"ref": {"path": f"{artifact_dir}/quarterly_financial_report_2025.pdf", "kind": "pdf"}},
+                        ],
+                    }
+                ]
+            },
+        }
+
+    def test_tool_names_work_dir_and_session_id_are_kept(self):
+        trace = self._trace()
+        result = _prepare_details(trace)
+        assert result == trace
+
+    def test_distinct_artifacts_stay_distinct(self):
+        from koda.state.dashboard_store import _build_execution_artifacts
+
+        trace = self._trace()
+        before = _build_execution_artifacts(trace["raw_artifacts"], None, 1)
+        after = _build_execution_artifacts(_prepare_details(trace)["raw_artifacts"], None, 1)
+        assert len(before) == 2
+        assert [item.get("path") for item in after] == [item.get("path") for item in before]

@@ -59,34 +59,6 @@ fn sensitive_key_pattern() -> &'static Regex {
     })
 }
 
-fn secret_key_pattern() -> &'static Regex {
-    static REGEX: OnceLock<Regex> = OnceLock::new();
-    REGEX.get_or_init(|| {
-        Regex::new(r"(?i)(token|secret|password|passwd|authorization|cookie|api[_-]?key|session)")
-            .unwrap()
-    })
-}
-
-fn bearer_pattern() -> &'static Regex {
-    static REGEX: OnceLock<Regex> = OnceLock::new();
-    REGEX.get_or_init(|| Regex::new(r"(?i)bearer\s+[a-z0-9._\-]+").unwrap())
-}
-
-fn cookie_pattern() -> &'static Regex {
-    static REGEX: OnceLock<Regex> = OnceLock::new();
-    REGEX.get_or_init(|| Regex::new(r"(?i)(cookie\s*[:=]\s*)([^;\n]+)").unwrap())
-}
-
-fn url_credential_pattern() -> &'static Regex {
-    static REGEX: OnceLock<Regex> = OnceLock::new();
-    REGEX.get_or_init(|| Regex::new(r"(https?://)([^/\s:@]+):([^/\s@]+)@").unwrap())
-}
-
-fn long_secret_pattern() -> &'static Regex {
-    static REGEX: OnceLock<Regex> = OnceLock::new();
-    REGEX.get_or_init(|| Regex::new(r"(?i)\b[a-z0-9_\-]{24,}\b").unwrap())
-}
-
 fn blocked_shell_pattern() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
@@ -321,42 +293,13 @@ pub fn sanitize_env(
     sanitized
 }
 
-pub fn redact_text(input: &str) -> String {
-    let redacted = bearer_pattern().replace_all(input, "Bearer [REDACTED]");
-    let redacted = cookie_pattern().replace_all(&redacted, "$1[REDACTED]");
-    let redacted = url_credential_pattern().replace_all(&redacted, "$1[REDACTED]:[REDACTED]@");
-    long_secret_pattern()
-        .replace_all(&redacted, "[REDACTED]")
-        .into_owned()
-}
-
-pub fn redact_value(value: &Value, key_hint: Option<&str>) -> Value {
-    if key_hint.is_some_and(|hint| secret_key_pattern().is_match(hint)) {
-        return Value::String("[REDACTED]".to_string());
-    }
-    match value {
-        Value::Null | Value::Bool(_) | Value::Number(_) => value.clone(),
-        Value::String(inner) => Value::String(redact_text(inner)),
-        Value::Array(items) => {
-            Value::Array(items.iter().map(|item| redact_value(item, None)).collect())
-        }
-        Value::Object(obj) => {
-            let mut redacted = Map::new();
-            for (key, inner) in obj {
-                redacted.insert(key.clone(), redact_value(inner, Some(key)));
-            }
-            Value::Object(redacted)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        redact_secret_like, redact_text, redact_value, sanitize_env, validate_logical_object_key,
-        validate_runtime_path, validate_scoped_object_key, validate_shell_command,
+        redact_secret_like, sanitize_env, validate_logical_object_key, validate_runtime_path,
+        validate_scoped_object_key, validate_shell_command,
     };
-    use serde_json::{json, Map, Value};
+    use serde_json::{Map, Value};
 
     #[test]
     fn redacts_middle_of_long_secret() {
@@ -457,37 +400,6 @@ mod tests {
         assert!(validate_runtime_path("/tmp/bad\npath", false).is_err());
         assert!(validate_runtime_path("", false).is_err());
         assert_eq!(validate_runtime_path("", true).expect("allow empty"), "");
-    }
-
-    #[test]
-    fn redaction_replaces_bearer_and_secret_keys() {
-        let payload = json!({
-            "authorization": "Bearer abcdefghijklmnopqrstuvwxyz123456",
-            "nested": {
-                "cookie": "session=supersecretcookie",
-                "url": "https://user:pass@example.com/path",
-            },
-            "plain": "token abcdefghijklmnopqrstuvwxyz123456"
-        });
-        let redacted = redact_value(&payload, None);
-        assert_eq!(redacted["authorization"], "[REDACTED]");
-        assert_eq!(redacted["nested"]["cookie"], "[REDACTED]");
-        assert_eq!(
-            redacted["nested"]["url"],
-            Value::String("https://[REDACTED]:[REDACTED]@example.com/path".to_string())
-        );
-        assert_eq!(
-            redacted["plain"],
-            Value::String("token [REDACTED]".to_string())
-        );
-    }
-
-    #[test]
-    fn redact_text_masks_bearer_tokens() {
-        assert_eq!(
-            redact_text("Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456"),
-            "Authorization: Bearer [REDACTED]"
-        );
     }
 
     #[test]

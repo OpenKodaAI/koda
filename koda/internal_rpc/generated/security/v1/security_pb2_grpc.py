@@ -35,11 +35,6 @@ class SecurityGuardServiceStub(object):
                 request_serializer=security_dot_v1_dot_security__pb2.ValidateObjectKeyRequest.SerializeToString,
                 response_deserializer=security_dot_v1_dot_security__pb2.ValidateObjectKeyResponse.FromString,
                 _registered_method=True)
-        self.RedactValue = channel.unary_unary(
-                '/koda.security.v1.SecurityGuardService/RedactValue',
-                request_serializer=security_dot_v1_dot_security__pb2.RedactValueRequest.SerializeToString,
-                response_deserializer=security_dot_v1_dot_security__pb2.RedactValueResponse.FromString,
-                _registered_method=True)
         self.ValidateFilePolicy = channel.unary_unary(
                 '/koda.security.v1.SecurityGuardService/ValidateFilePolicy',
                 request_serializer=security_dot_v1_dot_security__pb2.ValidateFilePolicyRequest.SerializeToString,
@@ -79,12 +74,6 @@ class SecurityGuardServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def RedactValue(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
     def ValidateFilePolicy(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -119,11 +108,6 @@ def add_SecurityGuardServiceServicer_to_server(servicer, server):
                     servicer.ValidateObjectKey,
                     request_deserializer=security_dot_v1_dot_security__pb2.ValidateObjectKeyRequest.FromString,
                     response_serializer=security_dot_v1_dot_security__pb2.ValidateObjectKeyResponse.SerializeToString,
-            ),
-            'RedactValue': grpc.unary_unary_rpc_method_handler(
-                    servicer.RedactValue,
-                    request_deserializer=security_dot_v1_dot_security__pb2.RedactValueRequest.FromString,
-                    response_serializer=security_dot_v1_dot_security__pb2.RedactValueResponse.SerializeToString,
             ),
             'ValidateFilePolicy': grpc.unary_unary_rpc_method_handler(
                     servicer.ValidateFilePolicy,
@@ -244,33 +228,6 @@ class SecurityGuardService(object):
             '/koda.security.v1.SecurityGuardService/ValidateObjectKey',
             security_dot_v1_dot_security__pb2.ValidateObjectKeyRequest.SerializeToString,
             security_dot_v1_dot_security__pb2.ValidateObjectKeyResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def RedactValue(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/koda.security.v1.SecurityGuardService/RedactValue',
-            security_dot_v1_dot_security__pb2.RedactValueRequest.SerializeToString,
-            security_dot_v1_dot_security__pb2.RedactValueResponse.FromString,
             options,
             channel_credentials,
             insecure,

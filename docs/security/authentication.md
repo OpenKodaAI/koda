@@ -556,10 +556,20 @@ message would reveal that the account exists.
 - The control plane (`python -m koda.control_plane`) configures the structured logging pipeline
   (`setup_logging` in `koda/logging_config.py`) before anything logs; the agent workers configure
   it at startup. `LOG_FORMAT=json` writes one JSON object per line on stdout; any other value
-  writes console lines. The pipeline replaces with `***` the value of these top-level event keys,
-  in any case: `password`, `new_password`, `current_password`, `recovery_code`, `session_token`,
-  `registration_token`, `bootstrap_code`, `code`, `totp_secret`, `api_key`, `apikey`, `secret`,
-  `private_key`, `token`, `authorization` and `cookie`. It does not look inside nested values, and
+  writes console lines. The pipeline replaces with `[REDACTED]` the value of every top-level event
+  key that the shared redactor (`koda/security/redaction.py`, the one audit, runtime and evals use)
+  treats as sensitive. The redactor splits a key into words (camelCase, `snake_case` and
+  `kebab-case`) and masks a key that contains, in any case, `authorization`, `token`, `secret`,
+  `password`, `passwd`, `cookie`, `credential`, `api_key`/`apikey`, `access_key`, `private_key`,
+  `recovery_code`, `bootstrap_code` or `credencial`/`credenciais`; a key with the word `auth` as
+  its last word or before `key`, `header`, `pass`/`password`, `token`, `secret`, `value` or
+  `string` (`auth`, `basicAuth`, `proxy_auth`, `auth_key`, `authKey`, `auth_header`); a key with
+  the PT-BR word
+  `senha` or `segredo`, a key that is exactly `chave`, or `chave` before `api`, `acesso`,
+  `secreta` or `privada` (`chave_api`, `chave_de_acesso`); or a key that is exactly `code` or
+  `session`. So `password`, `session_token`, `totp_secret`, `authorization` and `novaSenha` are
+  masked, while `exit_code`, `code_source`, `session_id`, `auth_mode`, `author`, `authority`
+  and `palavra_chave` are not. It does not look inside nested values or rewrite other values, and
   records from the standard `logging` module, such as third-party libraries', are formatted (with
   the same `level`, `logger` and `timestamp` keys) but not redacted. Both formats print an
   exception's plain traceback, its type, message and stack, without local variables: a console

@@ -174,3 +174,18 @@ def test_memory_safety_scanner_stays_linear_on_blank_regions_and_command_positio
     started = time.perf_counter()
     scan_memory_text(text)
     assert time.perf_counter() - started < 1.0
+
+
+@pytest.mark.parametrize(
+    "secret",
+    ["AKIAIOSFODNN7EXAMPLE", "sk-abcdefghijklmnopqrst", "api key: hunter2hunter2hunter2"],
+)
+def test_credential_leakage_preview_never_carries_the_credential(secret: str) -> None:
+    result = scan_memory_text(f"note {secret} end")
+
+    (finding,) = [item for item in result.findings if item.category == "credential_leakage"]
+    assert "[REDACTED]" in finding.match_preview
+    for part in ("AKIAIOSFODNN7EXAMPLE", "abcdefghijklmnopqrst", "hunter2hunter2hunter2"):
+        assert part not in finding.match_preview
+        assert part not in str(finding.to_dict())
+        assert part not in result.redacted_preview

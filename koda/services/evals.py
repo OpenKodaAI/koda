@@ -14,8 +14,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from koda.security.redaction import redact_value
 from koda.services.run_graph import verify_run_graph_completeness
-from koda.services.runtime.redaction import redact_value
 
 EVAL_CASE_SCHEMA_VERSION = "eval_case.v1"
 EVAL_RUN_SCHEMA_VERSION = "eval_run.v1"
@@ -60,28 +60,6 @@ def safe_preview(value: Any, *, limit: int = _MAX_PREVIEW_CHARS) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 1)].rstrip() + "..."
-
-
-def redacted(value: Any) -> Any:
-    try:
-        return redact_value(value)
-    except Exception:
-        return _fallback_redact(value)
-
-
-def _fallback_redact(value: Any, *, key_hint: str = "") -> Any:
-    lowered_key = key_hint.lower()
-    if any(part in lowered_key for part in ("secret", "token", "password", "credential", "api_key", "auth")):
-        return "[REDACTED]"
-    if isinstance(value, Mapping):
-        return {str(key): _fallback_redact(item, key_hint=str(key)) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_fallback_redact(item, key_hint=key_hint) for item in value]
-    if isinstance(value, str):
-        lowered = value.lower()
-        if any(part in lowered for part in ("bearer ", "api_key=", "token=", "password=", "secret=")):
-            return "[REDACTED]"
-    return value
 
 
 def _metric(value: float) -> float:
@@ -201,7 +179,7 @@ def build_eval_case_from_run(
         "case_key": case_key,
         "agent_id": agent_id.upper(),
         "source_task_id": int(task_id),
-        "query_text": safe_preview(redacted(query_text)),
+        "query_text": safe_preview(redact_value(query_text)),
         "task_kind": str(request.get("task_kind") or execution.get("task_kind") or "general"),
         "project_key": str(request.get("project_key") or ""),
         "environment": str(request.get("environment") or ""),
@@ -209,7 +187,7 @@ def build_eval_case_from_run(
         "modality": str(request.get("modality") or "text"),
         "expected_sources": expected_sources,
         "expected_layers": expected_layers,
-        "reference_answer": safe_preview(redacted(response_text)),
+        "reference_answer": safe_preview(redact_value(response_text)),
         "status": str(request.get("status") or "draft"),
         "gold_source_kind": str(request.get("gold_source_kind") or "human_corrected_task"),
         "metadata": metadata,
@@ -519,8 +497,8 @@ def build_trajectory_export(
                 "node_type": raw.get("node_type") or raw.get("type"),
                 "status": raw.get("status"),
                 "summary": safe_preview(raw.get("summary") or raw.get("label")),
-                "payload": redacted(as_record(raw.get("payload") or raw.get("metadata"))),
-                "refs": redacted(as_record(raw.get("refs"))),
+                "payload": redact_value(as_record(raw.get("payload") or raw.get("metadata"))),
+                "refs": redact_value(as_record(raw.get("refs"))),
             }
         )
     for step in as_list(replay_payload.get("steps")):
@@ -546,8 +524,8 @@ def build_trajectory_export(
                 "agent_id": agent_id.upper(),
                 "task_id": int(task_id),
                 "status": execution.get("status"),
-                "query_preview": safe_preview(redacted(execution.get("query_text"))),
-                "response_preview": safe_preview(redacted(execution.get("response_text"))),
+                "query_preview": safe_preview(redact_value(execution.get("query_text"))),
+                "response_preview": safe_preview(redact_value(execution.get("response_text"))),
             }
         )
     jsonl = "\n".join(canonical_json(line) for line in lines) + "\n"

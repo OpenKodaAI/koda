@@ -92,28 +92,6 @@ class TestValidateFilePolicyFailsClosed:
                 client.validate_file_policy(path="/tmp/test", require_file=False)
 
 
-class TestRedactValueFailsClosed:
-    """redact_value must fail closed when service is unavailable."""
-
-    def test_fails_closed_channel_unavailable(self):
-        with (
-            patch("grpc.insecure_channel", return_value=_FakeChannel()),
-            patch("grpc.channel_ready_future", return_value=_UnreadyFuture()),
-        ):
-            client = SecurityGuardClient()
-            with pytest.raises(RuntimeError, match="security_guard_service_unavailable"):
-                client.redact_value("secret_value", key_hint="password")
-
-    def test_fails_closed_without_key_hint(self):
-        with (
-            patch("grpc.insecure_channel", return_value=_FakeChannel()),
-            patch("grpc.channel_ready_future", return_value=_UnreadyFuture()),
-        ):
-            client = SecurityGuardClient()
-            with pytest.raises(RuntimeError, match="security_guard_service_unavailable"):
-                client.redact_value({"nested": "data"})
-
-
 class TestValidateObjectKeyFailsClosed:
     """validate_object_key must fail closed when service is unavailable."""
 

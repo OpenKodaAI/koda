@@ -15,6 +15,7 @@ from typing import Any
 import yaml
 
 from koda.config import DEFAULT_WORK_DIR, PROJECT_DIRS
+from koda.security.redaction import redact_text
 from koda.skills._package import SkillPackageError, scan_skill_package
 from koda.utils.workdir import validate_work_dir
 
@@ -73,12 +74,6 @@ SKIP_FILE_PATTERNS = (
     "*_dsa",
     "*_ecdsa",
     "*_ed25519",
-)
-
-SECRET_RE = re.compile(
-    r"(?i)([\"']?)"
-    r"([A-Za-z0-9_.-]*(?:api[_-]?key|secret|token|password|credential|private[_-]?key)[A-Za-z0-9_.-]*)"
-    r"\1(\s*[:=]\s*)([\"']?)[^\s\"',}]+(\4)"
 )
 
 FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
@@ -345,7 +340,7 @@ def read_importable_source_content(
     text = _read_text_file(target)
     if text is None:
         return ""
-    text = _redact_text(text)
+    text = redact_text(text)
     if len(text) > limit:
         return text[:limit].rstrip() + "\n\n[truncated by Koda workspace import]"
     return text
@@ -758,7 +753,7 @@ def _settings_sources(root: Path, file_path: Path, text: str) -> list[WorkspaceS
                         metadata={
                             "event": str(event_name),
                             "index": index,
-                            "command_preview": _redact_text(command)[:240],
+                            "command_preview": redact_text(command)[:240],
                         },
                         text=command,
                     )
@@ -784,7 +779,7 @@ def _source(
     text: str = "",
 ) -> WorkspaceScanSource:
     rel = _rel(root, file_path)
-    clean = _redact_text(text)
+    clean = redact_text(text)
     source_metadata = dict(metadata or {})
     if text:
         source_metadata.setdefault("content_sha256", hashlib.sha256(text.encode("utf-8")).hexdigest())
@@ -844,18 +839,8 @@ def _clip(value: str, limit: int) -> str:
     return clean[: max(0, limit - 1)].rstrip() + "…"
 
 
-def _redact_text(value: str) -> str:
-    return SECRET_RE.sub(
-        lambda match: (
-            f"{match.group(1)}{match.group(2)}{match.group(1)}{match.group(3)}"
-            f"{match.group(4)}[REDACTED]{match.group(5)}"
-        ),
-        value,
-    )
-
-
 def _parse_warning(code: str, exc: BaseException | str) -> str:
-    return f"{code}: {_clip(_redact_text(str(exc)), 180)}"
+    return f"{code}: {_clip(redact_text(str(exc)), 180)}"
 
 
 def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str, list[str]]:

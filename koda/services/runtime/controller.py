@@ -2446,7 +2446,12 @@ class RuntimeController:
                     (item for item in self.store.list_terminals(task_id) if int(item["id"]) == int(terminal_id)),
                     None,
                 )
-            kernel_session_id = self._terminal_kernel_session_id(terminal_row) or f"{token}:{terminal_id or 'primary'}"
+            # The kernel echoes and logs this id, so it is built from the attach session row id,
+            # never from the attach token (a credential).
+            kernel_session_id = (
+                self._terminal_kernel_session_id(terminal_row)
+                or f"attach-{attach_session_id}:{terminal_id or 'primary'}"
+            )
             kernel_terminal = await self._forward_runtime_kernel_operation(
                 operation="attach_terminal",
                 task_id=task_id,

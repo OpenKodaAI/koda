@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -1878,6 +1879,55 @@ async def test_create_attach_session_surfaces_kernel_session_identity(
     assert session["kernel_session_id"] == "kernel-session-7"
     assert store.events[-1]["payload"]["attach_session_id"] == 55
     assert store.events[-1]["payload"]["kernel_session_id"] == "kernel-session-7"
+
+
+@pytest.mark.asyncio
+async def test_create_attach_session_never_hands_the_attach_token_to_the_kernel(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    workspace_path = tmp_path / "workspace"
+    workspace_path.mkdir()
+    store = _StoreStub(
+        env={
+            "id": 31,
+            "task_id": 1,
+            "status": "active",
+            "current_phase": "paused_for_operator",
+            "workspace_path": str(workspace_path),
+            "runtime_dir": str(tmp_path / "runtime" / "tasks" / "1"),
+            "pause_state": "paused_for_operator",
+        }
+    )
+    kernel = _KernelStub(
+        health_payload={
+            "mode": "rust",
+            "transport": "grpc-uds",
+            "connected": True,
+            "ready": True,
+            "authoritative": True,
+            "production_ready": True,
+        },
+    )
+    seen: list[str] = []
+
+    async def _attach_terminal(*, task_id: int, session_id: str) -> dict[str, Any]:
+        # The kernel echoes the session id back and logs it ("terminal attached session_id=...").
+        seen.append(session_id)
+        return {"forwarded": True, "session_id": session_id, "attached": True}
+
+    kernel.attach_terminal = _attach_terminal  # type: ignore[method-assign]
+    controller = _build_controller(monkeypatch, tmp_path, store=store, kernel=kernel)
+    monkeypatch.setattr(store, "create_attach_session", lambda **kwargs: 56)
+    monkeypatch.setattr(controller_module.secrets, "token_urlsafe", lambda size: "attach-secret-token")
+
+    session = await controller.create_attach_session(task_id=1, attach_kind="terminal", can_write=True)
+
+    assert session is not None
+    assert session["token"] == "attach-secret-token"
+    assert seen == ["attach-56:primary"]
+    assert session["kernel_session_id"] == "attach-56:primary"
+    assert "attach-secret-token" not in json.dumps(store.events, default=str)
 
 
 @pytest.mark.asyncio
