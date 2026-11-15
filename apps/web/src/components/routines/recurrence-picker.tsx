@@ -340,7 +340,7 @@ export function RecurrencePicker({
               <span
                 className={cn(
                   "min-h-[1.05rem] text-[0.8125rem]",
-                  scheduleError ? "text-[var(--tone-danger-text)]" : "text-[var(--text-quaternary)]",
+                  scheduleError ? "text-[var(--tone-danger-text)]" : "text-[var(--text-tertiary)]",
                 )}
               >
                 {scheduleError ?? t("routines.editor.intervalHint")}

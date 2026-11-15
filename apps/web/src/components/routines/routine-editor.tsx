@@ -120,11 +120,11 @@ function defaultDateTimeLocal(timezone: string, now: Date = new Date()): string 
   return `${wallTimeIn(new Date(now.getTime() + 60 * 60 * 1000), timezone).slice(0, 14)}00`;
 }
 
-// The routine name is stored in `payload.name` (D-063). Runtime responses put the query text in
-// `summary`, so the name is never read from there.
+// The routine name is stored in `payload.name` (D-063). Routines created outside the dashboard
+// have none, so the editor falls back to `summary` (the query text), as the table does.
 function jobName(job: CronJob): string {
   const name = job.payload?.name;
-  return typeof name === "string" ? name : "";
+  return (typeof name === "string" ? name.trim() : "") || job.summary?.trim() || "";
 }
 
 function jobInstructions(job: CronJob | null | undefined): string {

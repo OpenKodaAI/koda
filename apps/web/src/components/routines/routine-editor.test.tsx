@@ -272,6 +272,34 @@ describe("RoutineEditor", () => {
     ).toHaveValue("Generate weekly status report");
   });
 
+  // Routines created outside the dashboard (Telegram /cron, agent tools, reminders) have no
+  // `payload.name`; the editor shows the same fallback title as the table instead of a blank name.
+  it("falls back to the summary when the job has no stored name", async () => {
+    const job: CronJob = {
+      id: 7,
+      bot_id: "beta",
+      user_id: 1,
+      chat_id: 1,
+      cron_expression: "0 * * * *",
+      trigger_type: "cron",
+      schedule_expr: "0 * * * *",
+      timezone: "UTC",
+      summary: "Check deploy health",
+      command: "Check deploy health",
+      description: "",
+      created_at: null,
+      enabled: 1,
+      status: "active",
+      work_dir: "/repo",
+      payload: { query: "Check deploy health" },
+    };
+
+    renderEditor({ mode: "edit", job });
+
+    expect(await screen.findByText(/Edit routine #7/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Daily code review/i)).toHaveValue("Check deploy health");
+  });
+
   it("uses defaultTimezone when provided", async () => {
     const { onSubmit } = renderEditor({ defaultTimezone: "America/Sao_Paulo" });
 
