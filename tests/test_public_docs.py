@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MARKDOWN_LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 HTML_ATTR_RE = re.compile(r'(?:href|src)="([^"]+)"')
+INLINE_CODE_MARKDOWN_PATH_RE = re.compile(r"`([^`\s]+\.md)`")
 
 PUBLIC_DOCS = [
     ROOT / "README.md",
@@ -67,6 +68,19 @@ def test_readme_and_docs_index_have_valid_local_links() -> None:
         for target in _local_targets(doc_path):
             resolved = (doc_path.parent / target).resolve()
             assert resolved.exists(), f"Broken local link in {doc_path.relative_to(ROOT)}: {target}"
+
+
+def test_upgrade_runbook_names_only_existing_documents() -> None:
+    """Each document the upgrade runbook sends operators to exists, linked or named in a code span."""
+    doc_path = ROOT / "docs" / "operations" / "upgrade.md"
+    text = doc_path.read_text(encoding="utf-8")
+    missing = [target for target in _local_targets(doc_path) if not (doc_path.parent / target).resolve().exists()]
+    missing += [
+        named
+        for named in INLINE_CODE_MARKDOWN_PATH_RE.findall(text)
+        if not ((ROOT / named).exists() or (doc_path.parent / named).exists())
+    ]
+    assert not missing, f"docs/operations/upgrade.md names documents that do not exist: {missing}"
 
 
 def test_public_docs_use_current_branding() -> None:

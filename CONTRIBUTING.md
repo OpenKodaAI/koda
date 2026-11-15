@@ -143,6 +143,7 @@ When a CI failure happens:
 - keep changes scoped and reviewable
 - include tests when behavior changes
 - update public docs when installation, APIs, or operator workflows change
+- add a `CHANGELOG.md` entry under `## [Unreleased]` for a change users, operators or API clients can notice (see [docs/reference/releases.md](docs/reference/releases.md#changelog))
 - update repository guidance when architecture or contributor-facing workflows change
 - do not commit local runtime state, caches, secrets, or machine-specific paths
 

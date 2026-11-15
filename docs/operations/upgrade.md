@@ -6,8 +6,10 @@ multi-supervisor deployments; cluster mode adds a drain step.
 
 ## Pre-flight (always)
 
-1. **Read the changelog.** Schema migrations and removed env vars
-   are called out in `docs/release-notes/<version>.md`.
+1. **Read the changelog.** [`CHANGELOG.md`](../../CHANGELOG.md) has a
+   section for each version since 1.0.18. Read every section between
+   your installed version and the new one: schema migrations, removed
+   settings and changed defaults are called out there.
 2. **Take a backup.** See [backup-restore.md](backup-restore.md).
 3. **Pull the new image** but do not restart yet.
 
@@ -333,9 +335,9 @@ docker compose up -d
 **Important:** rolling back a migration is a one-way door for any
 new column / table the new code wrote rows into. Forward-only
 migration design (additive ALTERs, never DROP COLUMN in the same
-release that introduces the column) keeps rollback safe. If a
-release notes called out a destructive migration, follow the
-release-specific rollback in `docs/release-notes/<version>.md`.
+release that introduces the column) keeps rollback safe. If the
+release's section in [`CHANGELOG.md`](../../CHANGELOG.md) calls out a
+destructive migration, follow the rollback steps it gives.
 
 ## Provider CLI versions
 

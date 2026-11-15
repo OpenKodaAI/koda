@@ -52,6 +52,17 @@ python3 scripts/release_metadata.py
 python3 scripts/release_metadata.py --write
 ```
 
+## Changelog
+
+[`../../CHANGELOG.md`](../../CHANGELOG.md) records user-visible changes in the
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format, starting at 1.0.18. A
+change that users, operators or API clients can notice adds its entry under
+`## [Unreleased]` in the same change. A version bump in `pyproject.toml` moves those
+entries under a new `## [X.Y.Z] - YYYY-MM-DD` heading and adds its compare link at
+the bottom of the file. `tests/test_open_source_hygiene.py` fails when the newest
+released heading is not the `pyproject.toml` version, when the file leaves the Keep a
+Changelog structure, or when a tracked changelog carries another product's title.
+
 ## Release Workflow
 
 The release workflow is designed to publish only after these gates pass:
