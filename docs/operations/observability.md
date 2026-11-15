@@ -13,7 +13,7 @@ alongside koda.
 | Structured logs | `structlog` → stdout / `~/.koda-local/var/log/` | Tail with `docker compose logs -f` or ship to Loki |
 | Audit events | `audit_events` table | Query via `koda` UI or directly in Postgres |
 | OpenTelemetry traces | Workers/supervisor when `OTEL_EXPORTER_OTLP_ENDPOINT` is set | Send to Tempo, Jaeger, Honeycomb, Datadog |
-| Health probes | `:8090/health` (granular: per-worker + per-sidecar) | Liveness/readiness from the host (`127.0.0.1`) or inside the stack (`app:8090`) |
+| Health probes | `:8090/health` (liveness, granular: per-worker + per-sidecar) and `:8090/ready` (readiness) | From the host (`127.0.0.1`) or inside the stack (`app:8090`) |
 
 Prometheus labels must stay low-cardinality. Do not add raw prompt text, user
 ids, chat ids, task ids, run ids, proposal ids, file paths, or message content
@@ -186,6 +186,24 @@ The `/health` endpoint exposes:
 }
 ```
 
-Ideal as the readinessProbe in Kubernetes / `healthcheck.test` in
-docker-compose. The shape is stable across versions — see
+`/health` is the liveness probe: it answers 200 even when `status` is
+`degraded`. The shape is stable across versions — see
 `tests/test_control_plane_supervisor_health.py` for the contract.
+
+## Readiness: `/ready`
+
+`/ready` answers 503 while a dependency the control plane cannot work
+without is down: Postgres (when `STATE_BACKEND=postgres`) and the runtime
+kernel. It answers 200 once both respond. The body names each check and
+carries no internal addresses:
+
+```json
+{"status": "ready" | "not_ready",
+ "checks": [{"name": "postgres", "ok": true, "latency_ms": 3, "error": null},
+            {"name": "runtime_kernel", "ok": true, "latency_ms": 1, "error": null}]}
+```
+
+Use it as the Kubernetes readinessProbe. The compose `app` healthcheck calls
+it, so `web` (`depends_on: app: service_healthy`) starts only once the
+control plane is ready, and `app` itself waits for the sidecars' own
+healthchecks.

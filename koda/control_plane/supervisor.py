@@ -49,6 +49,7 @@ from .settings import (
 log = get_logger(__name__)
 
 _HEALTH_PROBE_TIMEOUT_SECONDS: float = 1.0
+_READY_POSTGRES_TIMEOUT_SECONDS: float = 2.0
 
 # Module-scoped so tests can monkey-patch.
 _CRASH_LOOP_WINDOW_SECONDS: float = 300.0
@@ -202,6 +203,31 @@ async def _probe_sidecar(name: str, target: str) -> dict[str, Any]:
                 await channel.close()
 
 
+async def _probe_postgres() -> dict[str, Any]:
+    """Run ``SELECT 1`` on the control plane's primary state database."""
+    from koda.state.primary import primary_fetch_val, run_coro_sync
+
+    started = time.perf_counter()
+    error: str | None = None
+    try:
+        value = await asyncio.wait_for(
+            asyncio.to_thread(lambda: run_coro_sync(primary_fetch_val("SELECT 1"))),
+            timeout=_READY_POSTGRES_TIMEOUT_SECONDS,
+        )
+        if value != 1:
+            error = "unexpected_result"
+    except TimeoutError:
+        error = "timeout"
+    except Exception as exc:
+        error = exc.__class__.__name__
+    return {
+        "name": "postgres",
+        "ok": error is None,
+        "latency_ms": int((time.perf_counter() - started) * 1000),
+        "error": error,
+    }
+
+
 class ControlPlaneSupervisor:
     """Reconciles agent workers by delegating spawn/kill to the kernel."""
 
@@ -230,6 +256,7 @@ class ControlPlaneSupervisor:
         )
         setup_control_plane_routes(app)
         app.router.add_get("/health", self._health)
+        app.router.add_get("/ready", self._ready)
         app.router.add_get("/cluster/status", self._cluster_status)
         app.router.add_post("/cluster/drain", self._cluster_drain)
         app.router.add_post("/cluster/undrain", self._cluster_undrain)
@@ -321,6 +348,26 @@ class ControlPlaneSupervisor:
                     "sidecars_unhealthy": sidecars_unhealthy,
                 },
             }
+        )
+
+    async def _ready(self, _request: web.Request) -> web.Response:
+        """Readiness: 503 while a dependency the control plane cannot work without is down.
+
+        ``/health`` stays the liveness probe (always 200, ``degraded`` in the body).
+        """
+        from koda.state.primary import postgres_primary_mode
+
+        probes = [_probe_sidecar("runtime_kernel", config.RUNTIME_KERNEL_SOCKET)]
+        if postgres_primary_mode():
+            probes.append(_probe_postgres())
+        checks = [
+            {key: result[key] for key in ("name", "ok", "latency_ms", "error")}
+            for result in await asyncio.gather(*probes)
+        ]
+        ready = all(check["ok"] for check in checks)
+        return web.json_response(
+            {"status": "ready" if ready else "not_ready", "checks": checks},
+            status=200 if ready else 503,
         )
 
     def _render_worker_payload(self, statuses: list[AgentWorkerStatus]) -> list[dict[str, Any]]:
