@@ -12,8 +12,10 @@ import pytest
 
 import koda
 from koda.agent_contract import CORE_TOOL_CATALOG
+from koda.control_plane import execution_policy
 from koda.services import tool_dispatcher
 from koda.services.tool_prompt import build_agent_tools_prompt
+from koda.squads import capabilities
 
 _REMOVED_TOOLS = ("webhook_register", "webhook_unregister", "webhook_list", "event_wait")
 _KODA_ROOT = Path(koda.__file__).parent
@@ -46,3 +48,9 @@ def test_webhook_manager_is_gone_and_unreferenced() -> None:
         if "webhook_manager" in path.read_text(encoding="utf-8")
     ]
     assert referencing == []
+
+
+def test_category_maps_no_longer_name_a_webhook_category() -> None:
+    assert "webhook_" not in capabilities._TOOL_PREFIX_CATEGORY
+    assert capabilities._infer_tool_category("webhook_list") == "tool"
+    assert execution_policy._tool_family("webhook_list") != "webhook"

@@ -44,7 +44,6 @@ _TOOL_PREFIX_CATEGORY: dict[str, str] = {
     "snapshot_": "snapshots",
     "agent_": "agent_comm",
     "squad_": "agent_comm",
-    "webhook_": "webhook",
 }
 
 

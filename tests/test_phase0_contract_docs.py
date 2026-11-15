@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -83,3 +84,13 @@ def test_scaling_runbook_preserves_current_phase0_budgets() -> None:
 
     for marker in ["`bench`", "`chaos`", "Security / deny", "Observability / replay"]:
         assert marker in runbook
+
+
+def test_scaling_runbook_commands_name_existing_test_files() -> None:
+    # pytest stops on the first missing path and runs none of the others.
+    runbook = _read("docs/operations/scaling-resilience-runbook.md")
+
+    paths = re.findall(r"tests/[\w/]+\.py", runbook)
+
+    assert paths
+    assert [path for path in paths if not (ROOT / path).is_file()] == []
