@@ -161,3 +161,16 @@ def test_memory_safety_scanner_stays_linear_on_long_shell_flag_chains(text: str)
     started = time.perf_counter()
     scan_memory_text(text)
     assert time.perf_counter() - started < 1.0
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["\n" * 40000, "\r\n" * 20000, " \n" * 20000, "\n" + " " * 40000, ". " * 20000, "\n- " * 10000, "then, " * 10000],
+    ids=["newlines", "crlf", "space-newline", "newline-then-spaces", "sentences", "bullets", "then-comma"],
+)
+def test_memory_safety_scanner_stays_linear_on_blank_regions_and_command_positions(text: str) -> None:
+    # A command position (a line start, a separator, a sentence start, a list marker) takes only the
+    # horizontal space after it, so no newline walks the rest of a blank region (tool output).
+    started = time.perf_counter()
+    scan_memory_text(text)
+    assert time.perf_counter() - started < 1.0

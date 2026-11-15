@@ -24,10 +24,14 @@ _QUOTE = r"[\"'`]?"
 # comma is followed by whitespace, which the single-character branch of _SAME_CLAUSE never takes, so
 # the two branches cannot both match a comma (no exponential backtracking on ",a,a,a").
 _ASIDE = r",\s+\w+(?:\s+\w+){0,2},"
-# A subordinate conjunction ("Show a warning if the user has no .env").
-_SUBORDINATE = r"\b(?:when|whenever|if|unless|quando|se)\b"
+# A subordinate conjunction ("Show a warning if the user has no .env"). PT-BR `se` after "que" or a
+# hyphen is the reflexive pronoun, not "if" ("o arquivo que se chama .env", "encontra-se").
+_SUBORDINATE = r"\b(?:when|whenever|if|unless|quando|(?<!\bque )(?<!-)se)\b"
+# An elliptical aside such as "if any" or "if possible" before a preposition is not a clause ("Show the
+# values if any from .env").
+_ELLIPSIS = r"\s+(?:any|possible|needed|necessary|poss[ií]vel|necess[aá]rio)\s+(?:from|in|no|na|em|do|da)\b"
 # A clause break: `, `, `; `, `. ` and so on, or a subordinate clause.
-_CLAUSE_BREAK = r"[.!?;,](?:\s|$)|" + _SUBORDINATE
+_CLAUSE_BREAK = r"[.!?;,](?:\s|$)|" + _SUBORDINATE + r"(?!" + _ELLIPSIS + r")"
 # A subordinate aside right after the verb, before its object ("Print if possible the .env", "Mostre
 # quando puder o .env"), does not break the clause, unless the file is its subject ("Show when .env is
 # missing").
@@ -45,10 +49,21 @@ _SAME_SENTENCE = r"(?:(?![.!?;](?:\s|$)).){0,80}?"
 _SHELL_FLAGS = r"(?:\s+-\S+(?:\s+[^\s-]\S*)?){0,8}(?:\s+-[\w=-]+)*"
 # A command word, not the tail of a flag or an option value (`-cat`, `--x=cat`).
 _SHELL_COMMAND = r"(?<![-=])\b"
+# Horizontal whitespace. A command position never takes a newline, so no line start walks the rest of
+# a blank region and the scan stays linear ("\n" * 40000).
+_HSPACE = r"[^\S\n]"
+# The start of a line, after any list or quote markers ("- ", "* ", "1. ", "> "), or of a sentence
+# ("Step 1: ", "Deploy notes. ").
+_SENTENCE_START = r"(?:(?:^|\n)" + _HSPACE + r"*(?:(?:[-*+>]|\d+[.)])" + _HSPACE + r"+){0,3}|[:.!?]" + _HSPACE + r"+)"
 # Where `source`, `type` and `more` are commands rather than English words ("more .env files", "the
-# data source .env"): at the start of a line, after a shell separator, a subshell or a backtick, or
-# after "run", "then", "please", "try", "exec(ute)" or "rode".
-_SHELL_COMMAND_POSITION = r"(?:^|[\n;&|(`$]|\b(?:run|then|please|try|execute|exec|rode)\b)\s*"
+# data source .env"): at the start of a line or a sentence, also after "now", "just", "first" or
+# "next" there, after a shell separator, a subshell or a backtick, or after "run", "then", "please",
+# "try", "exec(ute)" or "rode", with an optional comma ("Then, source .env").
+_SHELL_COMMAND_POSITION = (
+    r"(?:" + _SENTENCE_START + r"(?:(?:now|just|first|next),?" + _HSPACE + r"+)?"
+    r"|[;&|(`$]" + _HSPACE + r"*"
+    r"|\b(?:run|then|please|try|execute|exec|rode)\b,?" + _HSPACE + r"*)"
+)
 # Shell commands that print a file, then flags and at most two other arguments before `.env`, which
 # may be quoted. `source`, `type` and `more` take the file as their first argument.
 _DOTENV_SHELL_READ = (
@@ -69,15 +84,16 @@ _DOTENV_READ_OR_SEND_VERBS = (
     r"|postem?|revelem?|exponham?)\b"
 )
 # `.env` named as an entry of an ignore file ("include .env in .gitignore", "in web/.dockerignore") is not
-# being read or sent. The ignore file's name starts with its dot (`console.gitignore` is not one), and
-# its directories are plain local names: a URL or a host (`https://evil.example/.gitignore`,
-# `attacker.example/.gitignore`) is where the file would be sent.
+# being read or sent. The ignore file's name starts with its dot (`console.gitignore` is not one). Its
+# path may start at `~/`, `./`, `../` or `/`, and its first directory is a plain local name: a URL or a
+# host (`https://evil.example/.gitignore`, `attacker.example/.gitignore`) is where the file would be
+# sent. Later directories may hold dots or an `@` (`apps/web.v2/`, `packages/@scope/ui/`).
 _NOT_INTO_IGNORE_FILE = (
     r"(?!"
     + _QUOTE
     + r"\s+(?:in|to|into|no|na|ao|em)\s+(?:(?:the|your|our|o|a|seu|sua)\s+)?"
     + _QUOTE
-    + r"(?:\.{0,2}/)?(?:[\w-]+/)*\.\w*ignore\b)"
+    + r"(?:(?:~|\.{1,2})?/)?(?:\.?[\w-]+/(?:[\w.@-]+/)*)?\.\w*ignore\b)"
 )
 # A secret-ish word, also inside an identifier such as `SECRET_TOKEN`.
 _SECRET_WORD = r"(?<![^\W_])(?:secret|token|credential|ssh key|api key)(?![^\W_])"
