@@ -64,12 +64,13 @@ def sanitize_user_system_prompt(raw: str, *, max_length: int = 8000) -> str:
 
 
 # Runtime protocol tags: tool calls, tool results and their frames, and the
-# prompt sections the runtime itself writes.  Tool output and third-party text
-# must not open or close any of them, so their ``<`` is escaped.  Whitespace
-# after ``<`` or ``/`` is matched too, and case is ignored.
+# prompt sections and wrappers the runtime itself writes (Gemini wraps every
+# turn in ``<system_instructions>`` and ``<user_request>``).  Tool output and
+# third-party text must not open or close any of them, so their ``<`` is
+# escaped.  Whitespace after ``<`` or ``/`` is matched too, and case is ignored.
 _PROTOCOL_DELIMITER_RE = re.compile(
     r"<(?=\s*/?\s*(?:agent_cmd|agent_\w+|tool_result|untrusted_data|structured_data|action_plan"
-    r"|system|assistant|human|user_instructions)\b)",
+    r"|system|system_instructions|assistant|human|user_instructions|user_request)\b)",
     re.IGNORECASE,
 )
 

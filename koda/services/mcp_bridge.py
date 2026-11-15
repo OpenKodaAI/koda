@@ -41,6 +41,15 @@ MCP_PARAM_DESCRIPTION_MAX_CHARS = 300
 
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 
+# A tool name is also its dispatch id, so it cannot be escaped: names outside
+# the MCP spec's character set and length are not offered to the model.
+_SAFE_MCP_TOOL_NAME_RE = re.compile(r"[A-Za-z0-9_.-]{1,128}")
+
+
+def is_safe_mcp_tool_name(name: object) -> bool:
+    """Return True when *name* can sit in the system prompt as a tool id."""
+    return isinstance(name, str) and _SAFE_MCP_TOOL_NAME_RE.fullmatch(name) is not None
+
 
 def sanitize_mcp_description(text: object, *, max_chars: int = MCP_TOOL_DESCRIPTION_MAX_CHARS) -> str:
     """Return a third-party MCP description fit for one line of the system prompt.

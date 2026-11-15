@@ -263,10 +263,13 @@ def _build_mcp_tools_prompt(agent_id: str) -> str:
                 continue
             from koda.services.mcp_bridge import (
                 MCP_PARAM_DESCRIPTION_MAX_CHARS,
+                is_safe_mcp_tool_name,
                 mcp_tool_id,
                 sanitize_mcp_description,
             )
 
+            if not is_safe_mcp_tool_name(tool.name):
+                continue
             tid = mcp_tool_id(instance.server_key, tool.name)
             desc = sanitize_mcp_description(tool.description) or "No description available."
             server_section_lines.append(f"**`{tid}`** — {desc}")
@@ -277,12 +280,15 @@ def _build_mcp_tools_prompt(agent_id: str) -> str:
                 required = set(tool.input_schema.get("required", []))
                 param_lines: list[str] = []
                 for param_name, param_info in props.items():
-                    param_type = param_info.get("type", "any")
+                    name = sanitize_mcp_description(param_name, max_chars=MCP_PARAM_DESCRIPTION_MAX_CHARS)
+                    param_type = sanitize_mcp_description(
+                        param_info.get("type", "any"), max_chars=MCP_PARAM_DESCRIPTION_MAX_CHARS
+                    )
                     param_desc = sanitize_mcp_description(
                         param_info.get("description", ""), max_chars=MCP_PARAM_DESCRIPTION_MAX_CHARS
                     )
                     req_marker = " (required)" if param_name in required else ""
-                    param_lines.append(f"  - `{param_name}` ({param_type}{req_marker}): {param_desc}")
+                    param_lines.append(f"  - `{name}` ({param_type}{req_marker}): {param_desc}")
                 if param_lines:
                     server_section_lines.append("  Parameters:")
                     server_section_lines.extend(param_lines)
