@@ -14,7 +14,7 @@ import functools
 import io
 import threading
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -251,6 +251,45 @@ def _concurrently(
         return list(pool.map(_outcome, attempts))
 
 
+def _default_isolation(monkeypatch: pytest.MonkeyPatch, level: str) -> None:
+    """Open the control-plane transactions as a server whose ``default_transaction_isolation`` is ``level`` does."""
+    from koda.state import control_plane_store
+
+    @contextlib.asynccontextmanager
+    async def _transaction() -> AsyncIterator[Any]:
+        backend = control_plane_store._require_primary_backend()
+        async with backend._connection() as conn:
+            await conn.execute(f"SET default_transaction_isolation = '{level}'")
+            try:
+                async with conn.transaction():
+                    yield control_plane_store.Transaction(conn)
+            finally:
+                await conn.execute("RESET default_transaction_isolation")
+
+    monkeypatch.setattr(control_plane_store, "transaction", _transaction)
+
+
+def _hold_after(monkeypatch: pytest.MonkeyPatch, prefix: str) -> None:
+    """Make each of two transactions wait, after its statement that starts with ``prefix``, for the other's.
+
+    Neither commits until both have run that statement, or 1 s has passed:
+    the other is then waiting on a lock this one holds.
+    """
+    from koda.state import control_plane_store
+
+    barrier = threading.Barrier(2, timeout=1)
+    original = control_plane_store.Transaction.execute
+
+    async def _execute(self: Any, query: str, params: tuple[Any, ...] = ()) -> int:
+        count = await original(self, query, params)
+        if query.startswith(prefix):
+            with contextlib.suppress(threading.BrokenBarrierError):
+                await asyncio.to_thread(barrier.wait)
+        return count
+
+    monkeypatch.setattr(control_plane_store.Transaction, "execute", _execute)
+
+
 def _split(outcomes: list[Any]) -> tuple[list[Any], list[Exception]]:
     return (
         [outcome for outcome in outcomes if not isinstance(outcome, Exception)],
@@ -299,17 +338,21 @@ def test_concurrent_registrations_with_one_code_create_one_owner(
 
 
 @pytest.mark.postgres
+@pytest.mark.parametrize("default_isolation", ["read committed", "repeatable read"])
 @pytest.mark.parametrize("presented", ["two_setup_codes", "loopback"])
 def test_concurrent_registrations_with_different_credentials_create_one_owner(
     operator_db: Path,
     bridge_loop: None,
     monkeypatch: pytest.MonkeyPatch,
     presented: str,
+    default_isolation: str,
 ) -> None:
     """D-294: two registrations racing with two valid setup codes (or two loopback-trusted ones) create one owner.
 
-    The loser changes nothing and gets the answer a registration gets once an owner exists.
+    The loser changes nothing and gets the answer a registration gets once an owner exists,
+    whatever the server's default isolation level.
     """
+    _default_isolation(monkeypatch, default_isolation)
     service = operator_auth_mod.OperatorAuthService()
     codes = [_bootstrap_file_code(service), service.issue_bootstrap_code(label="cli")["code"]]
     if presented == "two_setup_codes":
@@ -318,7 +361,10 @@ def test_concurrent_registrations_with_different_credentials_create_one_owner(
         credentials = [{"remote_ip": "127.0.0.1"}, {"remote_ip": "127.0.0.1"}]
 
     # Both have checked that no owner exists, redeemed their credential and
-    # recorded their writes before either transaction runs.
+    # recorded their writes before either transaction runs. A transaction that
+    # finds no owner commits only once the other has looked too, unless the
+    # other waits on the registration lock.
+    _hold_after(monkeypatch, operator_auth_mod._NO_OWNER_YET)
     outcomes = _concurrently(
         monkeypatch,
         service,
@@ -1333,18 +1379,27 @@ def test_regenerate_recovery_codes_fault_keeps_the_current_codes(operator_db: Pa
 
 
 @pytest.mark.postgres
+@pytest.mark.parametrize("default_isolation", ["read committed", "repeatable read"])
 def test_concurrent_regenerations_store_one_batch(
     operator_db: Path,
     bridge_loop: None,
     monkeypatch: pytest.MonkeyPatch,
+    default_isolation: str,
 ) -> None:
-    """D-295: a double-submitted regeneration stores one batch, the one returned; the other request changes nothing."""
+    """D-295: a double-submitted regeneration stores one batch, the one returned; the other request changes nothing.
+
+    The other request gets the 400 answer whatever the server's default isolation level.
+    """
+    _default_isolation(monkeypatch, default_isolation)
     service = operator_auth_mod.OperatorAuthService()
     payload = _create_owner(service)
     context = service.resolve_bearer_token(payload["session_token"])
     assert context is not None
 
-    # Both have read the current generation and recorded their writes before either transaction runs.
+    # Both have read the current generation and recorded their writes before
+    # either transaction runs. The one that moves the generation first commits
+    # only once the other has tried too, which then waits on the user row.
+    _hold_after(monkeypatch, "UPDATE cp_operator_users SET recovery_generation")
     outcomes = _concurrently(
         monkeypatch,
         service,

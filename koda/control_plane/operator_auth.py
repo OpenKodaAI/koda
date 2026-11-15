@@ -62,7 +62,11 @@ _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
 _OPERATOR_ONLY_AUTH_STATUS_FIELDS: tuple[str, ...] = ("recovery_available",)
 # Public auth status fields the setup screen needs, sent before login only while no owner exists.
 _SETUP_ONLY_AUTH_STATUS_FIELDS: tuple[str, ...] = ("bootstrap_file_path", "loopback_trust_enabled")
-# Owner registrations take this transaction-scoped lock first, keyed on the users
+# The first statement of the registration and regeneration transactions: their
+# checks rely on each statement reading what is committed when it starts, which
+# a server or role default of REPEATABLE READ or SERIALIZABLE would break.
+_READ_COMMITTED = "SET TRANSACTION ISOLATION LEVEL READ COMMITTED"
+# Owner registrations take this transaction-scoped lock next, keyed on the users
 # table, so they run one after another (D-294). The no-owner check is a separate,
 # later statement, so it reads the rows committed by the time the lock is held.
 _OWNER_REGISTRATION_LOCK = "SELECT pg_advisory_xact_lock('cp_operator_users'::regclass::oid::bigint)"
@@ -647,6 +651,7 @@ class OperatorAuthService:
         session_metadata = {"origin": "register_owner", "remote_ip": remote_ip, "forwarded_for": forwarded_for}
 
         def _register(conn: Any) -> tuple[list[str], str, str]:
+            conn.execute(_READ_COMMITTED)
             # A concurrent registration waits here until this one commits (D-294).
             conn.execute(_OWNER_REGISTRATION_LOCK)
             # The code is consumed next and only while unused (D-283): a
@@ -1012,6 +1017,7 @@ class OperatorAuthService:
         user_id = context.user_id
 
         def _regenerate(conn: Any) -> list[str]:
+            conn.execute(_READ_COMMITTED)
             # The user row first, as in the password reset, so the two queue
             # on it instead of deadlocking on the codes. It moves only from the
             # generation read above (D-295): of two regenerations sent at once,
