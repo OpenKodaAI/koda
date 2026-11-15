@@ -72,7 +72,9 @@ use an operational envelope under `error` with `code`, `category`, `message`,
 
 Eval suites create `pending_review` proposals for failed cases by default.
 Those proposals carry eval run/case, source task, RunGraph, and RunGraph node
-evidence. They remain inactive until explicit approval, validation, and apply.
+evidence. They stay in `pending_review` until an operator approves, validates,
+and accepts them, and accepting them does not change the agent: it records the
+decision and marks the `ledger_only` effects as applied (see step 4 above).
 
 ## Persistence, Audit, And Metrics
 

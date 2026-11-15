@@ -139,14 +139,21 @@ class TestScope:
 
     @pytest.mark.asyncio
     async def test_task_and_user_with_the_same_id_do_not_collide(self, store):
-        await store.save("task:111", "shared-name", {"subsystems": {"owner": "task"}})
-        await store.save("user:111", "user-only", {"subsystems": {"owner": "user"}})
+        # Before the fix the handlers keyed the store by ``task_id or user_id``,
+        # so task 111 and user 111 shared one directory. Build both scopes the
+        # way the handlers now do, from the same number.
+        from koda.snapshots.store import snapshot_scope
 
-        missing = store.load("user:111", "shared-name")
+        task_scope = snapshot_scope(task_id=111, user_id=5)
+        user_scope = snapshot_scope(task_id=None, user_id=111)
+        await store.save(task_scope, "shared-name", {"subsystems": {"owner": "task"}})
+        await store.save(user_scope, "user-only", {"subsystems": {"owner": "user"}})
+
+        missing = store.load(user_scope, "shared-name")
         assert isinstance(missing, str)
         assert "not found" in missing
-        assert [s["name"] for s in store.list_snapshots("user:111")] == ["user-only"]
-        assert [s["name"] for s in store.list_snapshots("task:111")] == ["shared-name"]
+        assert [s["name"] for s in store.list_snapshots(user_scope)] == ["user-only"]
+        assert [s["name"] for s in store.list_snapshots(task_scope)] == ["shared-name"]
 
     def test_scope_helper_prefers_the_task(self):
         from koda.snapshots.store import snapshot_scope

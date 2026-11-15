@@ -138,6 +138,14 @@ describe("ChannelConnectionArea (M6-E1-T2)", () => {
         expect(inputs.length).toBe(4);
         for (const input of Array.from(inputs)) {
           expect(input).toBeDisabled();
+          expect(input.className).toContain("disabled:opacity-60");
+        }
+        const revealButtons = within(dialog).getAllByRole("button", {
+          name: tr(language, "generated.ui.visualizar_valor_1d66e788"),
+        });
+        expect(revealButtons.length).toBe(3);
+        for (const button of revealButtons) {
+          expect(button).toBeDisabled();
         }
         expect(
           within(dialog).getByRole("button", { name: tr(language, "generated.controlPlane.validar_e_conectar_16aa616f") }),
