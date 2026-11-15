@@ -1431,18 +1431,17 @@ _EXPIRED_ROWS_SQL = {
     "audit_events": "SELECT COUNT(*) FROM audit_events WHERE timestamp < ?",
 }
 _MAINTENANCE_INTERVAL = timedelta(days=1)
+# A report that ends in error is not the day's run: it is tried again sooner.
+_MAINTENANCE_RETRY = timedelta(hours=1)
 _MAINTENANCE_REPORT_EVENT = "retention.report"
+# Session advisory lock a worker holds while it checks for and records the
+# day's report, so workers that start together record one report between them.
+_MAINTENANCE_LOCK_KEY = 0x6B6F64612E726574  # "koda.ret"
+# The deployment's last report, whichever worker recorded it.
+_LAST_REPORT_SQL = "SELECT max(timestamp) FROM audit_events WHERE event_type = ?"
 
 
-def run_maintenance() -> dict[str, Any]:
-    """Daily retention job, report-only: count rows past retention, delete nothing.
-
-    Counts the ``query_history`` rows older than 90 days and the
-    ``audit_events`` rows older than ``AUDIT_RETENTION_DAYS``, under every
-    agent scope, comparing the TIMESTAMPTZ ``timestamp`` column with an aware
-    UTC cutoff. Failures, including an unavailable backend, come back as an
-    ``error`` entry.
-    """
+async def _expired_rows_report() -> dict[str, Any]:
     now = datetime.now(UTC)
     windows = {
         "query_history": _QUERY_HISTORY_RETENTION_DAYS,
@@ -1455,7 +1454,7 @@ def run_maintenance() -> dict[str, Any]:
             cutoff = now - timedelta(days=days)
             result[f"{table}_retention_days"] = days
             result[f"{table}_cutoff"] = cutoff.isoformat()
-            expired = run_coro_sync(primary_fetch_val(_EXPIRED_ROWS_SQL[table], (cutoff,), agent_id=AGENT_ID))
+            expired = await primary_fetch_val(_EXPIRED_ROWS_SQL[table], (cutoff,), agent_id=AGENT_ID)
             result[f"{table}_expired"] = int(expired or 0)
     except Exception as exc:  # noqa: BLE001
         log.warning("db_maintenance_error", error=str(exc))
@@ -1463,48 +1462,69 @@ def run_maintenance() -> dict[str, Any]:
     return result
 
 
-def last_maintenance_report_at() -> datetime | None:
-    """When this agent last recorded a retention report, or ``None``."""
+def run_maintenance() -> dict[str, Any]:
+    """Daily retention job, report-only: count rows past retention, delete nothing.
+
+    Counts the ``query_history`` rows older than 90 days and the
+    ``audit_events`` rows older than ``AUDIT_RETENTION_DAYS``, under every
+    agent scope, comparing the TIMESTAMPTZ ``timestamp`` column with an aware
+    UTC cutoff. Failures, including an unavailable backend, come back as an
+    ``error`` entry.
+    """
+    return cast(dict[str, Any], run_coro_sync(_expired_rows_report()))
+
+
+async def _report_if_due() -> float:
+    """Take and record the day's report unless one is recorded; seconds to the next check."""
+    from koda.services.audit import AuditEvent, _insert_audit_primary
+
+    backend: Any = _primary_backend()
+    # A connection outside the pool: asyncpg unlocks advisory locks when a
+    # pooled connection is released. Closing it releases the lock.
+    lock = await backend._open_direct_connection()  # noqa: SLF001 - controlled shared backend bridge
     try:
-        _primary_backend()
-        value = run_coro_sync(
-            primary_fetch_val(
-                "SELECT timestamp FROM audit_events WHERE agent_id = ? AND event_type = ? "
-                "ORDER BY timestamp DESC LIMIT 1",
-                (_current_agent_scope(), _MAINTENANCE_REPORT_EVENT),
-                agent_id=AGENT_ID,
-            )
-        )
+        if not await lock.fetchval("SELECT pg_try_advisory_lock($1)", _MAINTENANCE_LOCK_KEY):
+            # Another worker is taking the report; its record sets the next check.
+            return _MAINTENANCE_RETRY.total_seconds()
+        last = await primary_fetch_val(_LAST_REPORT_SQL, (_MAINTENANCE_REPORT_EVENT,), agent_id=AGENT_ID)
+        if last:
+            wait = (datetime.fromisoformat(str(last)) + _MAINTENANCE_INTERVAL - datetime.now(UTC)).total_seconds()
+            if wait > 0:
+                return min(wait, _MAINTENANCE_INTERVAL.total_seconds())
+        result = await _expired_rows_report()
+        if "error" in result:
+            return _MAINTENANCE_RETRY.total_seconds()
+        log.info("db_maintenance_complete", **result)
+        try:
+            await _insert_audit_primary(AuditEvent(event_type=_MAINTENANCE_REPORT_EVENT, details=dict(result)))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("db_maintenance_report_not_recorded", error=str(exc))
+            return _MAINTENANCE_RETRY.total_seconds()
+        return _MAINTENANCE_INTERVAL.total_seconds()
+    finally:
+        await backend._close_direct_connection(lock)  # noqa: SLF001 - controlled shared backend bridge
+
+
+def run_maintenance_if_due() -> float:
+    """Run :func:`_report_if_due` from a sync caller; a failure is retried within the hour."""
+    try:
+        return float(run_coro_sync(_report_if_due()))
     except Exception as exc:  # noqa: BLE001
-        log.warning("db_maintenance_last_report_unavailable", error=str(exc))
-        return None
-    return datetime.fromisoformat(str(value)) if value else None
-
-
-def record_maintenance_report(result: dict[str, Any]) -> None:
-    """Record a report as a ``retention.report`` audit event."""
-    from koda.services.audit import AuditEvent, emit
-
-    emit(AuditEvent(event_type=_MAINTENANCE_REPORT_EVENT, details=dict(result)))
+        log.warning("db_maintenance_error", error=str(exc))
+        return _MAINTENANCE_RETRY.total_seconds()
 
 
 async def run_maintenance_loop(*, sleep: Callable[[float], Awaitable[object]] = asyncio.sleep) -> None:
-    """Run the retention report once a day, under the lifecycle supervisor.
+    """Run the retention report once a day per deployment, under the lifecycle supervisor.
 
-    The last report is recorded as an audit event, so a restart does not push
-    the next one back: the report runs at once when this agent's last one is
-    missing or a day old, and otherwise a day after it (as the memory
-    maintenance loop does). Each report is logged as ``db_maintenance_complete``.
+    Every worker runs this loop, but the schedule is deployment-wide: each
+    report is recorded as a ``retention.report`` audit event, and a worker
+    reports only when no worker recorded one in the last day, checking under
+    an advisory lock so workers that start together do not both report. A
+    restart therefore does not push the next report back. Each report is
+    logged as ``db_maintenance_complete``; a report that ends in error is not
+    recorded and is tried again within the hour.
     """
     loop = asyncio.get_running_loop()
-    last_run = await loop.run_in_executor(None, last_maintenance_report_at)
     while True:
-        if last_run is not None:
-            wait = (last_run + _MAINTENANCE_INTERVAL - datetime.now(UTC)).total_seconds()
-            if wait > 0:
-                await sleep(min(wait, _MAINTENANCE_INTERVAL.total_seconds()))
-        result = await loop.run_in_executor(None, run_maintenance)
-        last_run = datetime.now(UTC)
-        if "error" not in result:
-            log.info("db_maintenance_complete", **result)
-            await loop.run_in_executor(None, record_maintenance_report, result)
+        await sleep(await loop.run_in_executor(None, run_maintenance_if_due))

@@ -7,12 +7,15 @@ every agent scope, with TIMESTAMPTZ comparisons, and deletes nothing: deletes
 wait for the approved retention defaults (M2-E5-T2).
 
 The lifecycle supervisor runs it through ``run_maintenance_loop``, which
-records each report as a ``retention.report`` audit event, so a restart does
-not push the next report back.
+records each report as a ``retention.report`` audit event. The schedule is
+deployment-wide: a worker reports only when no report was recorded in the last
+day by any worker, under an advisory lock, so a restart does not push the next
+report back and the workers of a deployment record one report a day.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime, timedelta
@@ -40,13 +43,21 @@ async def _seeded_counts(conn: Any, schema: str) -> tuple[int, int]:
     return int(history), int(audit)
 
 
-async def _insert_report(conn: Any, schema: str, timestamp: datetime) -> None:
+async def _insert_report(conn: Any, schema: str, timestamp: datetime, agent_id: str = _AGENT) -> None:
     await conn.execute(
         f"""INSERT INTO "{schema}"."audit_events" (agent_id, timestamp, event_type)
                VALUES ($1, $2, $3)""",
-        _AGENT,
+        agent_id,
         timestamp,
         _REPORT_EVENT,
+    )
+
+
+async def _recorded_reports(conn: Any, schema: str) -> list[Any]:
+    return list(
+        await conn.fetch(
+            f'SELECT agent_id, details_json FROM "{schema}"."audit_events" WHERE event_type = $1', _REPORT_EVENT
+        )
     )
 
 
@@ -73,9 +84,8 @@ async def seeded(
     async def _clear() -> None:
         await conn.execute(f'DELETE FROM "{schema}"."query_history" WHERE user_id = $1', _USER_ID)
         await conn.execute(f'DELETE FROM "{schema}"."audit_events" WHERE event_type = $1', _EVENT)
-        await conn.execute(
-            f'DELETE FROM "{schema}"."audit_events" WHERE agent_id = $1 AND event_type = $2', _AGENT, _REPORT_EVENT
-        )
+        # The schedule reads every worker's reports.
+        await conn.execute(f'DELETE FROM "{schema}"."audit_events" WHERE event_type = $1', _REPORT_EVENT)
 
     await _clear()
     baseline = history_store.run_maintenance()
@@ -196,12 +206,9 @@ async def test_maintenance_loop_reports_at_start_and_records_the_report(
     assert len(reports) == 1
     assert reports[0]["mode"] == "report_only"
     assert reports[0]["query_history_expired"] >= len(_SCOPES) + 1
-    recorded = await conn.fetch(
-        f'SELECT details_json FROM "{schema}"."audit_events" WHERE agent_id = $1 AND event_type = $2',
-        _AGENT,
-        _REPORT_EVENT,
-    )
+    recorded = await _recorded_reports(conn, schema)
     assert len(recorded) == 1
+    assert recorded[0]["agent_id"] == _AGENT
     details = json.loads(recorded[0]["details_json"])
     assert details["query_history_expired"] == reports[0]["query_history_expired"]
     assert details["audit_events_expired"] == reports[0]["audit_events_expired"]
@@ -230,18 +237,116 @@ async def test_maintenance_loop_after_a_restart_waits_for_the_rest_of_the_day(
         (2, 0, _DAY - 2 * 3600),  # recent: wait for the rest of the day
     ],
 )
-async def test_maintenance_loop_schedules_from_the_last_recorded_report(
+@pytest.mark.parametrize("reported_by", [_AGENT, "RETENTION_OTHER_WORKER"])
+async def test_maintenance_loop_schedules_from_the_deployments_last_report(
     seeded: tuple[Any, str, dict[str, Any]],
     report_loop: tuple[Callable[[], Awaitable[None]], list[float], MagicMock],
     hours_ago: int,
     reports_at_start: int,
     first_sleep: int,
+    reported_by: str,
 ) -> None:
+    """The last report of any worker of the deployment counts, not only this
+    worker's own: retention covers whole tables, so one report a day is enough."""
     conn, schema, _ = seeded
     start, sleeps, log = report_loop
-    await _insert_report(conn, schema, datetime.now(UTC) - timedelta(hours=hours_ago))
+    await _insert_report(conn, schema, datetime.now(UTC) - timedelta(hours=hours_ago), agent_id=reported_by)
 
     await start()
 
     assert len(_completed_reports(log)) == reports_at_start
+    assert len(await _recorded_reports(conn, schema)) == 1 + reports_at_start
     assert sleeps == [pytest.approx(first_sleep, abs=60)]
+
+
+async def test_workers_starting_together_record_one_report(
+    seeded: tuple[Any, str, dict[str, Any]],
+    report_loop: tuple[Callable[[], Awaitable[None]], list[float], MagicMock],
+) -> None:
+    """Every worker of a deployment starts the loop. Started together, with no
+    report recorded, only one of them reports: the others wait for it."""
+    conn, schema, _ = seeded
+    start, sleeps, log = report_loop
+
+    await asyncio.gather(start(), start(), start())
+
+    assert len(_completed_reports(log)) == 1
+    assert len(await _recorded_reports(conn, schema)) == 1
+    assert len(sleeps) == 3
+    log.warning.assert_not_called()
+
+
+async def test_a_failed_report_is_retried_within_the_hour(
+    seeded: tuple[Any, str, dict[str, Any]],
+    report_loop: tuple[Callable[[], Awaitable[None]], list[float], MagicMock],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A report that ends in error is not the day's run: nothing is recorded
+    and the loop tries again in an hour, not a day later."""
+    from koda.state import history_store
+
+    conn, schema, _ = seeded
+    start, sleeps, log = report_loop
+    monkeypatch.setitem(history_store._EXPIRED_ROWS_SQL, "audit_events", "SELECT COUNT(*) FROM no_such_table_70531")
+
+    await start()
+
+    assert _completed_reports(log) == []
+    assert await _recorded_reports(conn, schema) == []
+    assert log.warning.call_args.args == ("db_maintenance_error",)
+    assert sleeps == [pytest.approx(3600, abs=60)]
+
+
+async def test_maintenance_loop_records_the_report_without_the_bridge_loop(
+    seeded: tuple[Any, str, dict[str, Any]],
+    report_loop: tuple[Callable[[], Awaitable[None]], list[float], MagicMock],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no bridge loop running, the loop's Postgres work runs on transient
+    ``asyncio.run`` loops, each with a fresh backend. The report must still be
+    recorded (the ``seeded`` fixture starts the bridge loop, so it is hidden here)."""
+    from koda.state import primary
+
+    conn, schema, _ = seeded
+    start, sleeps, log = report_loop
+    monkeypatch.setattr(primary, "_active_bridge_loop", lambda: None)
+
+    await start()
+
+    assert len(_completed_reports(log)) == 1
+    assert len(await _recorded_reports(conn, schema)) == 1
+    assert sleeps == [pytest.approx(_DAY, abs=60)]
+
+
+async def test_an_audit_event_is_written_without_the_bridge_loop(
+    migrated_postgres: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sync caller with no bridge loop running inserts on a transient loop,
+    whose shared backend is fresh and not bootstrapped yet. The event must be
+    written, not dropped without a log line."""
+    import koda.config as config_module
+    from koda.knowledge.config import KNOWLEDGE_V2_POSTGRES_SCHEMA
+    from koda.services import audit
+    from koda.state import primary
+
+    monkeypatch.setattr(config_module, "AGENT_ID", _AGENT)
+    monkeypatch.setattr(primary, "_active_bridge_loop", lambda: None)
+    log = MagicMock()
+    monkeypatch.setattr(audit, "log", log)
+    event = audit.AuditEvent(event_type=_EVENT, details={"path": "transient"})
+
+    await asyncio.get_running_loop().run_in_executor(None, audit.emit, event)
+
+    conn = await asyncpg.connect(migrated_postgres)
+    try:
+        written = await conn.fetchval(
+            f"""SELECT count(*) FROM "{KNOWLEDGE_V2_POSTGRES_SCHEMA}"."audit_events"
+                 WHERE event_type = $1 AND agent_id = $2 AND details_json->>'path' = 'transient'""",
+            _EVENT,
+            _AGENT,
+        )
+        await conn.execute(f'DELETE FROM "{KNOWLEDGE_V2_POSTGRES_SCHEMA}"."audit_events" WHERE event_type = $1', _EVENT)
+    finally:
+        await conn.close()
+    log.warning.assert_not_called()
+    assert written == 1

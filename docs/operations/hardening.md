@@ -147,7 +147,9 @@ v2 limits so a noisy workspace cannot starve others:
       daily retention job only reports how many `audit_events` and
       `query_history` rows are past retention (the
       `db_maintenance_complete` log line and a `retention.report`
-      audit event) and deletes none. Until retention deletes are
+      audit event) and deletes none. It reports once a day for the
+      whole deployment, whichever worker runs it, and a report that
+      fails is tried again within the hour. Until retention deletes are
       enabled, audit events and query history are kept indefinitely.
 - [ ] `audit_events` rows are reviewed weekly: any
       `control_plane.worker_crash_loop`, `command_blocked`, or
