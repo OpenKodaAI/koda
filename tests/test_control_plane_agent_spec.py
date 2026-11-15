@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from koda.control_plane.agent_spec import (
     build_agent_spec_from_snapshot,
     compose_agent_prompt,
@@ -412,3 +414,48 @@ def test_normalize_agent_spec_preserves_mission_profile_capability_fields() -> N
     assert mission.get("domains") == ["react"]
     assert mission.get("delegate_when") == "ui work"
     assert mission.get("do_not_delegate") == "infra"
+
+
+@pytest.mark.parametrize(
+    ("model_policy", "field"),
+    [
+        ({"default_models": {"claudee": "claude-sonnet-4-6"}}, "default_models"),
+        ({"tier_models": {"claudee": {"small": "claude-haiku-4-5"}}}, "tier_models"),
+        ({"available_models_by_provider": {"claudee": ["claude-sonnet-4-6"]}}, "available_models_by_provider"),
+    ],
+)
+def test_validate_agent_spec_rejects_unknown_provider_ids(model_policy: dict, field: str) -> None:
+    # M6-E3-T2 (D-157): a mistyped provider id fails publish instead of being dropped at runtime.
+    validation = validate_agent_spec({"model_policy": model_policy})
+
+    assert validation["ok"] is False
+    assert f"model_policy.{field} contains unknown providers: claudee" in validation["errors"]
+
+
+def test_validate_agent_spec_accepts_known_provider_ids_in_model_maps() -> None:
+    validation = validate_agent_spec(
+        {
+            "model_policy": {
+                "default_models": {"claude": "claude-sonnet-4-6", "codex": "gpt-5.4-mini"},
+                "tier_models": {"claude": {"small": "claude-haiku-4-5"}},
+                "available_models_by_provider": {"codex": ["gpt-5.4-mini"]},
+            }
+        }
+    )
+
+    assert not [error for error in validation["errors"] if "unknown providers" in error]
+
+
+@pytest.mark.parametrize("provider", ["llamacpp", "mlx"])
+@pytest.mark.parametrize("field", ["default_models", "tier_models", "available_models_by_provider"])
+def test_validate_agent_spec_accepts_local_runtime_providers_in_model_maps(provider: str, field: str) -> None:
+    # llamacpp and mlx are runtime providers (PROVIDER_MODELS, HTTP runners) outside the core catalog;
+    # publish exports their map entries to LLAMACPP_* / MLX_* settings.
+    value: object = {
+        "default_models": "qwen2.5-0.5b",
+        "tier_models": {"small": "qwen2.5-0.5b"},
+        "available_models_by_provider": ["qwen2.5-0.5b"],
+    }[field]
+    validation = validate_agent_spec({"model_policy": {field: {provider: value}}})
+
+    assert validation["ok"] is True, validation["errors"]

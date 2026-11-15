@@ -305,6 +305,25 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   install and refuses plain index builds on large tables. Migration 049 builds
   `idx_audit_events_type_time` with `CREATE INDEX CONCURRENTLY`. (M2-E2-T5)
 - `CLAUDE.md` is the one contributor and agent guide; `AGENTS.md` points to it. (M10-E1-T2)
+- The Telegram `/curl` command is an alias of `/fetch` and gives its result for the same
+  URL. Its output changes in three ways: it first replies "Fetching...", the page is sent
+  as plain text instead of inside a code block, and without a URL it answers
+  "Usage: /fetch <url>". The agent tool catalog describes `curl` as "Alias of /fetch", and
+  `/help` lists `/fetch` with `/curl` as its alias. (M6-E3-T4)
+- Publishing an agent fails when its model policy names an unknown provider in
+  `default_models`, `tier_models` or `available_models_by_provider`, as it already did
+  for `default_provider`. The core providers and the local runtimes `llamacpp` and `mlx`
+  are accepted. At runtime, an unknown provider id still falls back to the default
+  provider but logs `unknown_provider_id`. (M6-E3-T2, D-157)
+- Changing the agent's general provider or model, or a per-function default model, from
+  Telegram (`/settings`, `/provider`, `/model`, `/featuremodel` or chat) now publishes the
+  agent. Before, the change was only saved as a draft and the agent kept the model of its
+  published version. The supervisor then restarts that agent's worker on the new version,
+  as a voice change already did. The restart resets the Telegram chat state of every chat
+  with that agent (the current session, the `/setdir` directory and the agent mode), and a
+  task still running after the 15-second shutdown grace period is stopped. When the agent
+  cannot be published, the change stays in the draft and the reply says the agent keeps
+  its previous model, instead of reporting the new one. (M6-E3-T2, D-068)
 
 
 ### Removed
@@ -433,6 +452,26 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   from the keyboard, and each page has one h1. (M8-E1-T1, M8-E1-T2, M8-E1-T3)
 - The memory safety scanner is pinned by a labelled English and Portuguese corpus: fewer
   false refusals of developer text, more Portuguese injections caught. (M3-E4-T6, D-035)
+- With `RUNTIME_ENVIRONMENTS_ENABLED=true`, light tasks and answers from the response
+  cache complete. Before, every such task failed with "runtime terminal output requires
+  a kernel-backed terminal path" after the provider had answered. The kernel terminal is
+  now required only for a task with a runtime environment, and the non-streaming
+  provider run registers one as the streaming run does. (M6-E1-T8, D-064)
+- A task with a write step is no longer sent to review, with its answer replaced by "Nao
+  posso confirmar a conclusao operacional com seguranca...", only because there is no
+  knowledge to ground it. When knowledge is disabled (`KNOWLEDGE_ENABLED=false`) or the
+  agent's knowledge corpus is empty, the answer is still evaluated (action plan, metrics,
+  warnings) but the grounding gate does not retain it, and the runtime logs
+  `grounding_gate_skipped` instead. (M6-E1-T5, F-MEM-28)
+- With `RUNTIME_ENVIRONMENTS_ENABLED=true`, a task whose provider never ran (no eligible
+  provider, or the provider is unavailable) now fails with the provider error, such as "No
+  verified providers are eligible for runtime fallback.", instead of "runtime terminal
+  output requires a kernel-backed terminal path". A provider error that is delivered as a
+  completed answer still needs the kernel terminal. (D-297)
+- A chat message that names a provider used only by one feature (`elevenlabs`, `kokoro`
+  or `whispercpp`) without the feature, such as "switch to kokoro", no longer changes the
+  agent's general provider to the default one. Nothing changes, and the reply names the
+  feature to use, for example "switch audio to kokoro". (D-296)
 
 
 ## [1.0.18] - 2026-05-20

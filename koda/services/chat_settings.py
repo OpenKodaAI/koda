@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import re
 import unicodedata
 from typing import Any
@@ -117,7 +118,10 @@ def _find_provider_in_text(text: str, candidates: list[str], *, feature: bool = 
         if str(item).strip()
     }
     for raw_token, resolved in sorted(alias_map.items(), key=lambda item: len(item[0]), reverse=True):
-        normalized = normalize_feature_provider(resolved) if feature else normalize_provider(resolved)
+        # The aliases resolve to canonical ids. normalize_provider would map the function-only
+        # providers (elevenlabs, kokoro, whispercpp) to the default general provider and log
+        # unknown_provider_id for every message scanned here.
+        normalized = normalize_feature_provider(resolved) if feature else resolved
         if normalized in normalized_candidates and _word_match(text, raw_token):
             return normalized
     return None
@@ -260,6 +264,33 @@ def _apply_feature_model_change(text: str, user_data: dict[str, Any], settings: 
     )
 
 
+def _feature_only_provider_reply(text: str, settings: dict[str, Any]) -> str | None:
+    """Answer a feature-only provider named without its feature (D-296): it never becomes the general provider."""
+    if _find_feature_from_text(text):
+        return None
+    general_provider_ids = set(_general_provider_ids(settings))
+    features_by_provider: dict[str, list[str]] = {}
+    for function_id, options in _feature_option_map(settings).items():
+        if function_id == "general":
+            continue
+        for item in options:
+            provider_id = normalize_feature_provider(str(item.get("provider_id") or ""))
+            if not provider_id or provider_id in general_provider_ids:
+                continue
+            features = features_by_provider.setdefault(provider_id, [])
+            if function_id not in features:
+                features.append(function_id)
+    named_provider = _find_provider_in_text(text, list(features_by_provider), feature=True)
+    if not named_provider:
+        return None
+    features = features_by_provider[named_provider]
+    feature_list = ", ".join(f"<code>{function_id}</code>" for function_id in features)
+    return (
+        f"Nothing changed: <code>{named_provider}</code> is a provider for {feature_list}, not the general provider. "
+        f"Name the feature, for example: <code>switch {features[0]} to {named_provider}</code>."
+    )
+
+
 def _apply_voice_change(text: str, user_data: dict[str, Any]) -> str | None:
     if "voz" not in text and "voice" not in text:
         return None
@@ -294,20 +325,28 @@ def maybe_apply_agent_local_settings_from_chat(query_text: str, user_data: dict[
     if settings is None:
         return None
 
-    voice_message = _apply_voice_change(normalized_text, user_data)
-    if voice_message:
-        return voice_message
+    try:
+        voice_message = _apply_voice_change(normalized_text, user_data)
+        if voice_message:
+            return voice_message
 
-    feature_message = _apply_feature_model_change(normalized_text, user_data, settings)
-    if feature_message:
-        return feature_message
+        feature_message = _apply_feature_model_change(normalized_text, user_data, settings)
+        if feature_message:
+            return feature_message
 
-    provider_message = _apply_provider_change(normalized_text, user_data, settings)
-    if provider_message:
-        return provider_message
+        provider_message = _apply_provider_change(normalized_text, user_data, settings)
+        if provider_message:
+            return provider_message
 
-    model_message = _apply_general_model_change(normalized_text, user_data, settings)
-    if model_message:
-        return model_message
+        model_message = _apply_general_model_change(normalized_text, user_data, settings)
+        if model_message:
+            return model_message
+
+        feature_only_reply = _feature_only_provider_reply(normalized_text, settings)
+        if feature_only_reply:
+            return feature_only_reply
+    except ValueError as exc:
+        # A setter raises ValueError for a change it could not apply, such as a failed publish.
+        return html.escape(str(exc), quote=False)
 
     return None

@@ -82,6 +82,15 @@ class TestCmdHelpAndSetdirCoverage:
         assert "sess-123" in text
 
     @pytest.mark.asyncio
+    async def test_help_lists_curl_as_an_alias_of_fetch(self, mock_update, mock_context):
+        # M6-E3-T4 (F-SKL-13): /curl routes to the /fetch handler.
+        init_user_data(mock_context.user_data)
+
+        await cmd_help(mock_update, mock_context)
+
+        assert "/fetch [url] — fetch a URL (alias: /curl)" in mock_update.message.reply_text.call_args.args[0]
+
+    @pytest.mark.asyncio
     async def test_setdir_sets_existing_directory(self, mock_update, mock_context, tmp_path):
         mock_context.args = [str(tmp_path)]
         init_user_data(mock_context.user_data)

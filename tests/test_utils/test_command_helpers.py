@@ -245,3 +245,22 @@ class TestAuthorizedWithRateLimit:
             result = await handler(mock_update, mock_context)
             assert result == "ok"
             assert "work_dir" in mock_context.user_data
+
+
+def test_normalize_provider_logs_an_unknown_provider_id():
+    # M6-E3-T2 (D-157): the fallback to the default provider is no longer silent.
+    with (
+        patch("koda.utils.command_helpers.DEFAULT_PROVIDER", "claude"),
+        patch("koda.utils.command_helpers.log") as mock_log,
+    ):
+        assert normalize_provider("claudee") == "claude"
+    mock_log.warning.assert_called_once_with("unknown_provider_id", provider="claudee", fallback="claude")
+
+
+def test_normalize_provider_does_not_log_known_or_empty_ids():
+    with patch("koda.utils.command_helpers.log") as mock_log:
+        normalize_provider("anthropic")
+        normalize_provider("codex")
+        normalize_provider("")
+        normalize_provider(None)
+    mock_log.warning.assert_not_called()

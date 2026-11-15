@@ -4652,6 +4652,17 @@ class KnowledgeV2PostgresBackend:
             for row in rows
         ]
 
+    async def has_knowledge_chunks(self) -> bool:
+        """Whether this agent's knowledge corpus holds any chunk; True when the backend cannot tell."""
+        if not self.bootstrapped:
+            return True
+        async with self._connection() as conn:
+            value = await conn.fetchval(
+                f"""SELECT EXISTS (SELECT 1 FROM "{self._schema}"."knowledge_chunks" WHERE agent_id = $1)""",
+                self._agent_id,
+            )
+        return bool(value)
+
     async def count_recent_queries(self, *, user_id: int, since: datetime | str) -> int:
         if not self.bootstrapped:
             return 0
