@@ -278,6 +278,20 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   can no longer open a private thread it is not in, squad sync never adds members to a
   private thread, and break-glass access is refused when its audit event cannot be written.
   (M1-E5-T1, M1-E5-T4, D-038, D-041, D-304, D-306)
+- A skill package that runs code through a route the verified-bytes check does not cover
+  (`runpy.run_path`, `compile`, `exec` or `eval` through builtins, `source_to_code`,
+  `marshal` or `pickle`, a loader of its own, another interpreter through `os.exec*`,
+  `os.spawn*`, `posix` or `multiprocessing`, and similar standard routes, also when imported
+  under an alias) now needs an operator review at install, reported as
+  `python.exec_from_file`. A package already installed keeps loading; the review applies to
+  its next install or update. A package's modules and root are dropped when it is
+  unregistered, and its files are refused until the next verified registration. (D-311,
+  D-310)
+- The skill package scanner denies `os.system`, `subprocess`, `exec` and `eval` however a
+  package imports them: through an import alias, a star import, or a literal module name
+  passed to `__import__`, `builtins.__import__`, `importlib.__import__` or
+  `importlib.import_module`. Importing `posix`, `nt`, `_posixsubprocess` or `_winapi` is
+  denied as well. A package that uses `os` only for `os.path` still installs. (D-323)
 
 
 ### Added
@@ -390,6 +404,8 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   task still running after the 15-second shutdown grace period is stopped. When the agent
   cannot be published, the change stays in the draft and the reply says the agent keeps
   its previous model, instead of reporting the new one. (M6-E3-T2, D-068)
+- Dashboard: a room `PATCH` accepts only `photo_url` in `metadata`; any other key, such as
+  the server-owned budget flags, answers 400. (M3-E6-T5)
 
 
 ### Removed
@@ -543,6 +559,30 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   migrations are no longer cancelled by the query timeout. (D-284, D-295, D-285)
 - `/cancel <id>` and `/cancel` stop a running task on Postgres; before, the runtime looked
   tasks up with an agent id casing the writer never uses. (D-293)
+- Routines: Escape in a popover or menu inside the routine editor (timezone, time, date,
+  connectors, agent) closes only that popover and keeps the edits; Escape with none open
+  still closes the editor. Other dialogs built on the same Escape handler behave the same.
+  (D-277)
+- Squads: a paused or out-of-budget room runs no agent turn on any path, including turns
+  already queued and turns requeued from the dead-letter queue. A pause, by the operator or
+  the budget, posts exactly one system event that names its reason, and the budget sweep
+  pauses every open room at its cap. (M3-E6-T5, D-075)
+- Squads: an expired task claim is dispatched again, then escalated, while a turn refused
+  because its room is paused no longer uses up a claim expiry: the first router sweep after
+  the room reopens dispatches the task again. A squad turn whose room cannot be read for a
+  moment is retried instead of dropped, and a runtime API squad message to a room that does
+  not exist gets 404. (M3-E6-T5, D-097)
+- Web: every design token a component reads is now defined; editor panels, skill cards and
+  system settings cards that rendered transparent use the canvas and soft panel surfaces,
+  and a contract test rejects any undefined custom property. (M8-E5-T3)
+- Web: the quietest text colour (`--text-quaternary`) meets WCAG AA 4.5:1 in light and dark,
+  including on the modal and floating glass; highlighted palette rows step their secondary
+  text up to `--text-tertiary`. (D-267)
+- Web: the command palette's listbox owns its options through labelled groups, and
+  `/sessions` no longer has an unnamed combobox, `aria-label` on generic elements or a
+  redundant logo alt text. (D-282)
+- Web: dimmed session surfaces (a pending message, a submitted form, a system event row, a
+  submitting room composer) keep a full-strength focus ring. (D-281)
 
 
 ## [1.0.18] - 2026-05-20
